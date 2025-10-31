@@ -1,5 +1,20 @@
 from transformers import Qwen3VLForConditionalGeneration, AutoProcessor
 
+import torch
+from huggingface_hub import login
+
+# If not logged in via CLI, login programmatically
+login(token="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")
+
+
+
+print(f"CUDA available: {torch.cuda.is_available()}")
+if torch.cuda.is_available():
+    print(f"GPU name: {torch.cuda.get_device_name(0)}")
+    print(f"Number of GPUs: {torch.cuda.device_count()}")
+else:
+    print("⚠️ No GPU detected. Running on CPU.")
+
 # default: Load the model on the available device(s)
 model = Qwen3VLForConditionalGeneration.from_pretrained(
     "Qwen/Qwen3-VL-4B-Instruct", dtype="auto", device_map="auto"
@@ -15,15 +30,27 @@ model = Qwen3VLForConditionalGeneration.from_pretrained(
 
 processor = AutoProcessor.from_pretrained("Qwen/Qwen3-VL-4B-Instruct")
 
+# messages = [
+#     {
+#         "role": "user",
+#         "content": [
+#             {
+#                 "type": "image",
+#                 "image": "https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen-VL/assets/demo.jpeg",
+#             },
+#             {"type": "text", "text": "Describe this image."},
+#         ],
+#     }
+# ]
 messages = [
     {
         "role": "user",
         "content": [
             {
                 "type": "image",
-                "image": "https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen-VL/assets/demo.jpeg",
+                "image": "foodchain.jpeg",
             },
-            {"type": "text", "text": "Describe this image."},
+            {"type": "text", "text": "Describe this image. list all the components in the image and Explain the relation in sequence"},
         ],
     }
 ]
@@ -39,7 +66,7 @@ inputs = processor.apply_chat_template(
 inputs = inputs.to(model.device)
 
 # Inference: Generation of the output
-generated_ids = model.generate(**inputs, max_new_tokens=128)
+generated_ids = model.generate(**inputs, max_new_tokens=1024)
 generated_ids_trimmed = [
     out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
 ]
