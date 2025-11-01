@@ -1,11 +1,19 @@
+print("Importing transformers...", flush=True)
 from transformers import Qwen3VLForConditionalGeneration, AutoProcessor
 
+print("Importing torch...", flush=True)
 import torch
+
+print("Importing huggingface_hub...", flush=True)
 from huggingface_hub import login
+
+import os
+print("Setting environment variables...", flush=True)
 
 # If not logged in via CLI, login programmatically
 
-login(token="YOUR_TOKEN_HERE")
+login(token="")
+print("logged into HF", flush=True)
 
 print(f"CUDA available: {torch.cuda.is_available()}")
 if torch.cuda.is_available():
