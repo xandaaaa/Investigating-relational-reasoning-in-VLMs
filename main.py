@@ -12,7 +12,7 @@ print("Setting environment variables...", flush=True)
 
 # If not logged in via CLI, login programmatically
 
-login(token="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")
+login(token="")
 print("logged into HF", flush=True)
 
 print(f"CUDA available: {torch.cuda.is_available()}")
@@ -33,9 +33,9 @@ messages = [
         "content": [
             {
                 "type": "image",
-                "image": "foodchain.jpeg",
+                "image": "./synthetic_dataset_generation/output/images/image_00001.png", #"foodchain.jpeg"
             },
-            {"type": "text", "text": "Describe this image. list all the components in the image and Explain the relation in sequence"},
+            {"type": "text", "text": "Where does the arrow between the yellow triangle and cyan circle point to?"},
         ],
     }
 ]
@@ -58,4 +58,5 @@ generated_ids_trimmed = [
 output_text = processor.batch_decode(
     generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
 )
+print('\n\n===== Output =====\n')
 print(output_text[0])
