@@ -12,7 +12,7 @@ print("Setting environment variables...", flush=True)
 
 # If not logged in via CLI, login programmatically
 
-login(token="")
+login(token="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")
 print("logged into HF", flush=True)
 
 print(f"CUDA available: {torch.cuda.is_available()}")
@@ -26,29 +26,7 @@ else:
 model = Qwen3VLForConditionalGeneration.from_pretrained(
     "Qwen/Qwen3-VL-4B-Instruct", dtype="auto", device_map="auto"
 )
-
-# We recommend enabling flash_attention_2 for better acceleration and memory saving, especially in multi-image and video scenarios.
-# model = Qwen3VLForConditionalGeneration.from_pretrained(
-#     "Qwen/Qwen3-VL-4B-Instruct",
-#     dtype=torch.bfloat16,
-#     attn_implementation="flash_attention_2",
-#     device_map="auto",
-# )
-
 processor = AutoProcessor.from_pretrained("Qwen/Qwen3-VL-4B-Instruct")
-
-# messages = [
-#     {
-#         "role": "user",
-#         "content": [
-#             {
-#                 "type": "image",
-#                 "image": "https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen-VL/assets/demo.jpeg",
-#             },
-#             {"type": "text", "text": "Describe this image."},
-#         ],
-#     }
-# ]
 messages = [
     {
         "role": "user",
@@ -80,4 +58,4 @@ generated_ids_trimmed = [
 output_text = processor.batch_decode(
     generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
 )
-print(output_text)
+print(output_text[0])
