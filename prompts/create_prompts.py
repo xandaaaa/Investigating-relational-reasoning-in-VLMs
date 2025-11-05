@@ -1,7 +1,7 @@
 import json
 import random
 from typing import List, Dict
-
+from pathlib import Path
 class QuestionGenerator:
     def __init__(self, json_data: Dict):
         self.data = json_data
@@ -12,7 +12,7 @@ class QuestionGenerator:
         self.shapes = ['circle', 'square', 'rectangle', 'triangle']
         self.colors = ['red', 'green', 'blue', 'yellow', 'magenta', 'cyan', 'purple', 'orange']
         
-    def format_question(self, question: str, options: List[str], answer: str) -> Dict:
+    def format_question(self, question: str, options: List[str], answer: str, query_type: str) -> Dict:
         """Format question with options and answer"""
 
         option_labels = ['a)', 'b)', 'c)', 'd)', 'e)', 'f)']
@@ -20,7 +20,10 @@ class QuestionGenerator:
 
         formatted_question = f"{question}? Here are your options: {formatted_options} Please only reply with the correct option, do not explain your reasoning. If no option is correct, reply with 'None'."
         return {
-            'question': formatted_question,
+            'image_id': self.image_id,
+            'image_filename': self.image_filename,
+            'query_type': query_type,
+            'query': formatted_question,
             'answer': answer
         }
     
@@ -42,7 +45,8 @@ class QuestionGenerator:
         return self.format_question(
             "How many shapes are in this image",
             options,
-            answer
+            answer,
+            "count"
         )
     
     def generate_recognition_questions(self) -> List[Dict]:
@@ -61,9 +65,10 @@ class QuestionGenerator:
             
             if actual_shape not in asked_shapes:
                 questions.append(self.format_question(
-                    f"Does this image have a {actual_shape} shape?",
+                    f"Does this image have a {actual_shape} shape",
                     ['a) Yes', 'b) No'],
-                    'a)'
+                    'a)',
+                    "recognition_shape"
                 ))
             asked_shapes.add(actual_shape)
         
@@ -74,7 +79,8 @@ class QuestionGenerator:
             questions.append(self.format_question(
                 f"Does this image have a {wrong_shape}",
                 ['Yes', 'No'],
-                'b)'
+                'b)',
+                "recognition_shape"
             ))
         
         # True cases (Color)
@@ -86,7 +92,8 @@ class QuestionGenerator:
                 questions.append(self.format_question(
                     f"Does this image have a {actual_color} shape",
                     ['Yes', 'No'],
-                    'a)'
+                    'a)',
+                    "recognition_color"
                 ))
             asked_color.add(actual_color)
         
@@ -97,7 +104,8 @@ class QuestionGenerator:
             questions.append(self.format_question(
                 f"Does this image have a {wrong_color} shape",
                 ['Yes', 'No'],
-                'b)'
+                'b)',
+                "recognition_color"
             ))
         
         # True cases (Shape + Color)
@@ -107,7 +115,8 @@ class QuestionGenerator:
             questions.append(self.format_question(
                 f"Does this image have a {color} {shape}",
                 ['Yes', 'No'],
-                'a)'
+                'a)',
+                "recognition_shape_and_color"
             ))
         
         # False cases (Shape + Color)
@@ -118,7 +127,8 @@ class QuestionGenerator:
                     questions.append(self.format_question(
                         f"Does this image have a {color} {shape}",
                         ['Yes', 'No'],
-                        'b)'
+                        'b)',
+                        "recognition_shape_and_color"
                     ))
                     wrong_pair_found = True
                     break
@@ -164,7 +174,8 @@ class QuestionGenerator:
             questions.append(self.format_question(
                 f"What is the position of the {obj['color']} {obj['shape']} with respect to the {subject['color']} {subject['shape']}",
                 options,
-                answer
+                answer,
+                "implicit_spatial"
             ))
         
         return questions
@@ -273,7 +284,8 @@ class QuestionGenerator:
         questions.append(self.format_question(
             "Which objects are connected",
             options,
-            answer
+            answer,
+            "explicit_connection"
         ))
         
         # ARROW BASED
@@ -284,8 +296,7 @@ class QuestionGenerator:
             
             correct_option = f"from the {subject['color']} {subject['shape']} to the {obj['color']} {obj['shape']}"
             
-            # Try to create up to 3 wrong options
-            all_entities = [e for e in self.entities]
+            # Try to create 3 wrong options
             wrong_answers = []
             attempts = 0
 
@@ -325,7 +336,8 @@ class QuestionGenerator:
             questions.append(self.format_question(
                 f"Where does the arrow between the {subject['color']} {subject['shape']} and {obj['color']} {obj['shape']} point to",
                 options,
-                answer
+                answer,
+                "explicit_arrow_direction"
             ))
         
         return questions
@@ -347,6 +359,70 @@ class QuestionGenerator:
         all_questions.extend(self.generate_explicit_questions())
         
         return all_questions
+
+
+def compile_json(annotations_folder: str, output_json: str):
+    """
+    Process all annotation JSON files in a folder and output to JSON
+    
+    Args:
+        annotations_folder: Path to folder containing annotation JSON files
+        output_json: Path to output JSON file
+    """
+    # Get all JSON files in the folder
+    json_files = sorted(Path(annotations_folder).glob('*.json'))
+    
+    print(f"Found {len(json_files)} annotation files")
+    
+    # Group by image
+    grouped_results = []
+    
+    for json_file in json_files:
+        print(f"Processing: {json_file.name}")
+        
+        # Load JSON
+        with open(json_file, 'r') as f:
+            json_data = json.load(f)
+        
+        # Generate questions
+        generator = QuestionGenerator(json_data)
+        questions = generator.generate_all_questions()
+        
+        # Create grouped structure
+        image_data = {
+            'image_id': json_data['image_id'],
+            'image_filename': json_data['image_filename'],
+            'questions': [
+                {
+                    'query_type': q['query_type'],
+                    'query': q['query'],
+                    'ground_truth': q['answer']
+                }
+                for q in questions
+            ]
+        }
+        grouped_results.append(image_data)
+    
+    # Write to JSON
+    with open(output_json, 'w', encoding='utf-8') as f:
+        json.dump(grouped_results, f, indent=2, ensure_ascii=False)
+    
+    total_questions = sum(len(img['questions']) for img in grouped_results)
+    print(f"\nProcessed {len(json_files)} files")
+    print(f"Generated {total_questions} questions")
+    print(f"Output saved to: {output_json}")
+    
+    # Print query type distribution
+    query_types = {}
+    for image_data in grouped_results:
+        for q in image_data['questions']:
+            qt = q['query_type']
+            query_types[qt] = query_types.get(qt, 0) + 1
+    
+    print("\nQuery type distribution:")
+    for qt, count in sorted(query_types.items()):
+        print(f"  {qt}: {count}")
+
 
 def example_print_questions():
     """prints all queries for a json file (json_file_path) from the synthetic dataset"""
@@ -371,9 +447,11 @@ def example_print_questions():
         print(f"Q: {q['question']}")
         print(f"A: {q['answer']}")
 
-def main():
-    pass
-
 if __name__ == "__main__":
+
+    annotations_folder = 'synthetic_dataset_generation/output/annotations'
+    output_json = 'queries.json'
+    compile_json(annotations_folder, output_json)
+
+    #EXAMPLE SHOW CREATED QUERIES FOR ONE IMAGE
     # example_print_questions()
-    pass
