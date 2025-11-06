@@ -6,14 +6,18 @@ A procedural dataset generator for studying relational reasoning in Vision-Langu
 
 This dataset generator produces synthetic images containing 2D geometric shapes with both **explicit** (arrow-based) and **implicit** (position-based) spatial relations. It is specifically designed to test whether VLMs genuinely understand spatial relationships or rely on visual shortcuts and memorized patterns.
 
+The pipeline now includes a **masking ablation extension** for probing model robustness: Randomly mask one object (and its connections) or one relation (no arrow for explicit) per image, enabling controlled experiments on relational binding without introducing visual artifacts. Evaluation scripts allow testing VLMs on single images or batches using ground-truth (GT) annotations for precise prompting.
+
 ### Key Features
 
 - **Procedural generation**: Fully automated creation of 1000+ images with zero manual annotation
 - **Controlled complexity**: 2-5 entities per scene with balanced attribute distributions
 - **Dual relation types**: Explicit relations (with arrows) and implicit relations (spatial only)
+- **Masking ablation**: Re-rendered variants masking exactly one object/relation per image (995 valid masked images; skips degenerate scenes)
 - **CLEVR-inspired methodology**: Rejection sampling, bias control, and structured annotations
-- **Ground-truth annotations**: Complete JSON metadata for entities, bounding boxes, and relations
+- **Ground-truth annotations**: Complete JSON metadata for entities, bounding boxes, relations, and masking info
 - **VLM-ready format**: 224×224 RGB images compatible with CLIP, LLaVA, Qwen3-VL, GPT-4V
+- **Evaluation tools**: Scripts for single/batch VLM testing with dynamic GT-based prompts
 
 ## Motivation
 
@@ -23,6 +27,7 @@ Recent research shows that VLMs often rely on **knowledge shortcuts** rather tha
 - Which layers/heads specialize in relational binding
 - Where architectural bottlenecks occur in complex scenes
 - Whether models use visual cues (arrows) vs. spatial reasoning (positions)
+- Robustness to ablations: Does masking an explicit arrow force positional inference?
 
 ## Methodology
 
@@ -62,7 +67,41 @@ Input: Scene ID, Configuration
 Output: PNG image + JSON annotation
 ```
 
-### 2. Shape Design (3D → 2D Mapping)
+### 2. Masking Ablation Pipeline
+
+The masking extension creates perturbed variants for ablation studies, following supervisor recommendations (randomly sample out a connection or object). It re-renders scenes cleanly to avoid artifacts:
+
+```
+Input: Original output directory
+    ↓
+1. Load Original Scene (per image_id)
+   - Entities and relations from annotation JSON
+   - Skip if <2 entities (degenerate; ~5 skipped → 995 masked)
+    ↓
+2. Random Mask Type (50/50)
+   - Object: Remove 1 random entity + its connected relations
+   - Relation: Flag 1 random explicit/implicit relation (no arrow drawn if explicit)
+    ↓
+3. Re-Render Clean Scene
+   - White background (255,255,255)
+   - Draw remaining entities (shapes, colors, positions exact)
+   - Draw arrows only for non-masked explicit relations
+   - No bleeding/overlaps (full re-draw vs. patching)
+    ↓
+4. Update Annotation
+   - Copy original + masking_info (type, masked_item)
+   - Flag masked relations with 'masked': true
+    ↓
+Output: Masked PNG + JSON (in output/masked/)
+```
+
+**Masking Types**:
+- **Object Mask**: Removes one entity (e.g., ID=2) + clears connected relations (e.g., 2 arrows). Tests entity-relation binding.
+- **Relation Mask**: Flags one relation (e.g., index=1, "above", explicit=true) – omits arrow visually. Tests visual vs. spatial cues.
+
+**Rationale**: Enables precise VLM probes (e.g., query masked relation: "Is the cyan circle above the red square?" – expect drop if arrow-masked).
+
+### 3. Shape Design (3D → 2D Mapping)
 
 This dataset uses 2D equivalents of CLEVR's 3D shapes for conceptual alignment:
 
@@ -75,7 +114,7 @@ This dataset uses 2D equivalents of CLEVR's 3D shapes for conceptual alignment:
 
 **Rationale**: 2D shapes eliminate depth ambiguity while preserving shape distinctiveness for testing entity recognition and relational binding.
 
-### 3. Spatial Relations
+### 4. Spatial Relations
 
 Relations are computed using centroid positions:
 
@@ -86,7 +125,7 @@ Relations are computed using centroid positions:
 
 **Primary relation** is determined by the axis with larger displacement (dx vs. dy).
 
-### 4. Explicit vs. Implicit Relations
+### 5. Explicit vs. Implicit Relations
 
 **Explicit Relations** (50% of relations):
 - Visual arrow drawn from subject to object
@@ -98,7 +137,7 @@ Relations are computed using centroid positions:
 - Tests **genuine spatial reasoning** capabilities
 - Requires VLM to infer relations from entity positions
 
-### 5. Bias Control
+### 6. Bias Control
 
 Following CLEVR's methodology, the generator implements:
 
@@ -107,6 +146,7 @@ Following CLEVR's methodology, the generator implements:
 - **Varied complexity**: Random 2-5 entities per scene
 - **Spatial diversity**: Uniform random placement within valid regions
 - **Relation coverage**: All pairwise relations annotated
+- **Masking Balance**: 50/50 object/relation; skips <2 entities for quality
 
 ## Dataset Structure
 
@@ -114,24 +154,30 @@ Following CLEVR's methodology, the generator implements:
 
 ```
 output/
-├── images/
-│   ├── image_00000.png       # 224×224 RGB image
-│   ├── image_00001.png
+├── images/                    # Original images
+│   ├── image_00000.png
 │   └── ...
 │   └── image_00999.png
-├── annotations/
-│   ├── annotation_00000.json  # Structured metadata
-│   ├── annotation_00001.json
+├── annotations/               # Original annotations
+│   ├── annotation_00000.json
 │   └── ...
 │   └── annotation_00999.json
-└── metadata.json               # Dataset-level statistics
+├── masked/                    # Masked ablation variants (~995 images)
+│   ├── images/
+│   │   ├── image_00000_masked.png
+│   │   └── ...
+│   ├── annotations/
+│   │   ├── annotation_00000_masked.json  # Includes 'masking_info'
+│   │   └── ...
+│   └── masked_metadata.json    # Masked dataset stats
+└── metadata.json              # Original dataset-level statistics
 ```
 
 ### Annotation Schema
 
-Each `annotation_XXXXX.json` file contains:
+Each `annotation_XXXXX.json` (original) or `annotation_XXXXX_masked.json` (masked) contains:
 
-```
+```json
 {
   "image_id": 0,
   "image_filename": "image_00000.png",
@@ -142,14 +188,14 @@ Each `annotation_XXXXX.json` file contains:
       "shape": "circle",
       "size": "large",              // small | medium | large
       "color": "red",               // red | green | blue | yellow | magenta | cyan | purple | orange
-      "center":,         // (x, y) pixel coordinates[11][12]
+      "center": [112, 112],         // (x, y) pixel coordinates
       "bbox": {
         "x_min": 60,
         "y_min": 80,
         "x_max": 140,
         "y_max": 160
       }
-    },
+    }
     // ... more entities
   ],
   "relations": [
@@ -158,17 +204,30 @@ Each `annotation_XXXXX.json` file contains:
       "object_id": 1,
       "relation": "left_of",        // left_of | right_of | above | below
       "explicit": true              // true = arrow drawn, false = implicit
-    },
+    }
     // ... all pairwise relations
-  ]
+  ],
+  "masking_info": {               // Only in masked annotations
+    "type": "relation",           // object | relation
+    "masked_item": {
+      "relation_index": 1,
+      "was_explicit": true,
+      "relation": "above"
+    }
+  }
 }
 ```
 
+**Notes on Masked Annotations**:
+- Entities: Reduced if object-masked (e.g., num_entities=2).
+- Relations: Flagged with `"masked": true` for relation-masked; removed if connected to masked object.
+- Skipped: ~5 images with <2 entities (no masked files; use AnnotationLoader fallback if needed).
+
 ### Metadata Format
 
-`metadata.json` provides dataset-level information:
+`metadata.json` (original) and `masked_metadata.json` provide dataset-level information:
 
-```
+```json
 {
   "dataset_name": "2D Synthetic Relational Reasoning Dataset",
   "num_images": 1000,
@@ -178,11 +237,12 @@ Each `annotation_XXXXX.json` file contains:
     "test": [900, 901, ..., 999]      // 10%
   },
   "config": {
-    "image_size":,[13]
-    "background_color": ,
+    "image_size": [224, 224],
+    "background_color": [255, 255, 255],
     "train_split": 0.8,
     "val_split": 0.1,
-    "test_split": 0.1
+    "test_split": 0.1,
+    "masked": true                     // In masked_metadata
   }
 }
 ```
@@ -195,6 +255,7 @@ Each `annotation_XXXXX.json` file contains:
 - Pillow (image generation)
 - NumPy (numerical operations)
 - tqdm (progress bars)
+- Transformers, Torch (for VLM evaluation; ~8GB GPU recommended for Qwen-VL)
 
 ### Setup
 
@@ -204,58 +265,114 @@ cd synthetic_dataset_generation/
 
 # Install dependencies
 pip install -r requirements.txt
+
+# For VLM evaluation (add if needed)
+pip install transformers torch huggingface-hub
 ```
 
 ## Usage
 
-### Basic Generation
+### 1. Dataset Generation
 
-Generate 1000 images with default settings:
+Generate 1000 original images:
 
 ```
 python generate_dataset.py
 ```
 
-Expected output:
-```
-🎨 Starting 2D Synthetic Dataset Generation...
-📊 Generating 1000 images...
-100%|████████████████████| 1000/1000 [02:30<00:00, 6.64it/s]
-✅ Dataset generation complete!
-📁 Output: /path/to/output
-   - Images: /path/to/output/images
-   - Annotations: /path/to/output/annotations
-   - Metadata: /path/to/output/metadata.json
-```
+### 2. Masking Ablation
 
-**Generation time**: ~2-3 minutes for 1000 images on standard CPU
-
-### Custom Configuration
-
-Modify `config.py` to adjust parameters:
+After generation, create masked variants:
 
 ```
-# Number of images
-DATASET_CONFIG = {
-    'num_images': 500,  # Change to generate fewer images
-    'image_size': (224, 224),
-    'train_split': 0.8,
-    'val_split': 0.1,
-    'test_split': 0.1,
-}
-
-# Entity parameters
-SHAPE_CONFIG = {
-    'min_entities': 3,  # Minimum entities per scene
-    'max_entities': 6,  # Maximum entities per scene
-}
-
-# Relation parameters
-RELATION_CONFIG = {
-    'explicit_ratio': 0.6,  # 60% explicit, 40% implicit
-    'arrow_width': 3,        # Thicker arrows
-}
+python create_masked_dataset.py  # All 1000 (processes ~995)
+# Or: python create_masked_dataset.py --num_images 500 --seed 42
 ```
+
+### 3. Ground-Truth Annotation Loading
+
+Use `get_annotations.py` (AnnotationLoader class) to load GT for images:
+
+```
+# Python usage
+from get_annotations import AnnotationLoader
+loader = AnnotationLoader(base_dir="output")
+gt = loader.get_gt("image_00001.png", masked=True, fallback_to_original=True)
+print(json.dumps(gt, indent=2))  # Full JSON with entities/relations/masking_info
+
+# CLI
+python get_annotations.py image_00001.png --masked --fallback
+```
+
+**Ground-Truth Explanation**:
+- **Entities**: Unique shapes/colors/sizes at exact positions (centers/bboxes) – use for describing objects in prompts (e.g., "the red triangle").
+- **Relations**: All pairwise spatial triples (subject_id, object_id, relation, explicit) – derive prompts (e.g., "Is A left_of B?" for GT "yes").
+- **Masking Info** (masked only): Details what was removed (e.g., relation_index=1: "above" explicit) – flag in eval for ablation analysis.
+- **Access**: Loader extracts scene_id from filename (e.g., image_00001.png → ID=1). Fallback loads original if masked skipped. No manual file hunting.
+
+### 4. VLM Evaluation
+
+Use `test_single_image.py` for single-image testing (Qwen-VL by default) or your batch script (`evaluate_relations.py`) for full datasets. Prompts are dynamically generated from GT relations (one per relation, e.g., 3-6 prompts/image) using templates like "Is the {color} {shape} above the {color} {shape}?" (GT="yes").
+
+#### Single-Image Testing (`test_single_image.py`)
+Quickly probe a specific image (masked/unmasked) with all GT-derived prompts:
+
+```
+# Unmasked
+python test_single_image.py --image_filename image_00001.png --base_dir output
+
+# Masked (with fallback if skipped)
+python test_single_image.py --image_filename image_00001.png --masked --base_dir output
+
+# Both (compare unmasked vs. masked)
+python test_single_image.py --image_filename image_00001.png --both --base_dir output
+
+# Text-only baseline (no image)
+python test_single_image.py --image_filename image_00001.png --text_only --base_dir output
+
+# Custom output dir
+python test_single_image.py --image_filename image_00001.png --both --out_dir ./my_results --base_dir output
+```
+
+**Parameters**:
+- `--image_filename` (required): e.g., `image_00001.png` (extracts scene_id=1).
+- `--masked`: Test masked image/annotation (appends `_masked.png`/`_masked.json`).
+- `--both`: Run unmasked + masked sequentially.
+- `--text_only`: Skip image; test text prompts only (baseline).
+- `--base_dir` (default: `output`): Root for images/annotations.
+- `--out_dir` (default: `./rel_out_single`): Save CSV/JSON results.
+
+**Expected Outputs**:
+- **Console**:
+  ```
+  ================================================== Testing UNMASKED ==================================================
+  ✅ Loaded GT: 3 entities, 3 relations
+  Image: output/images/image_00001.png
+
+  Prompt (left_of): Is the red triangle to the left of the blue square?
+  Raw: Yes, the red triangle is positioned to the left of the blue square.
+  Parsed: yes | GT: yes | Correct: ✓
+
+  --- UNMASKED Summary ---
+  Prompts: 3 | Accuracy: 1.000
+    above: 1.000
+    below: 1.000
+    left_of: 1.000
+
+  Saved CSV: ./rel_out_single/results_image_00001_both.csv
+  Saved JSON: ./rel_out_single/results_image_00001_both.json
+  ```
+  - For masked: Adds "⚠️ MASKED RELATION (explicit=true: no arrow visible)" if prompt queries masked item.
+- **Files** (in `--out_dir`):
+  - `results_<filename>_<mode>.csv`: Per-prompt rows (mode, img, question, gt, pred, relation, raw, is_masked, explicit). E.g., columns for easy Excel analysis.
+  - `results_<filename>_<mode>.json`: Full results list + summary dict (acc, per_relation).
+- **GT Usage**: Prompts derive from GT relations (e.g., left_of → "Is A left of B?"); GT="yes" always. Masked GT flags ablations. Accuracy: Pred yes/no vs. GT (using your `parse_yesno`).
+
+**Batch Evaluation** (`evaluate_relations.py` – your original script):
+```
+python evaluate_relations.py --img_dir output/images --ann_dir output/annotations --max_samples 100 --out_dir ./batch_results
+```
+- Processes all/up to N annotations; generates GT prompts; saves CSV with metrics. Add `--masked` flag if extending for masked dir.
 
 ## Code Architecture
 
@@ -263,12 +380,16 @@ RELATION_CONFIG = {
 
 ```
 synthetic_dataset_generation/
-├── config.py                # Configuration parameters
+├── config.py                # Configuration parameters (add MASKING_CONFIG)
 ├── shapes.py                # Shape drawing functions (circle, square, etc.)
 ├── scene_generator.py       # Core scene generation logic
 ├── relation_annotator.py    # Relation detection and arrow rendering
 ├── utils.py                 # Helper functions (collision detection, etc.)
 ├── generate_dataset.py      # Main execution script
+├── create_masked_dataset.py # Masking ablation (re-rendering)
+├── get_annotations.py       # AnnotationLoader class for GT loading
+├── test_single_image.py     # New: Single-image VLM testing (Qwen-VL, GT prompts)
+├── evaluate_relations.py    # Your batch VLM evaluator (optional extension)
 └── requirements.txt         # Dependencies
 ```
 
@@ -284,28 +405,10 @@ synthetic_dataset_generation/
 - Draws arrows for explicit relations
 - Generates relation metadata
 
-### Extension Points
-
-To add new shapes:
-
-```
-# In shapes.py
-def draw_pentagon(draw, center, size, color):
-    """Draw a pentagon."""
-    x, y = center
-    points = [...]  # Calculate pentagon vertices
-    draw.polygon(points, fill=color, outline=(0, 0, 0), width=1)
-    return bbox
-
-# Register in SHAPE_DRAWERS
-SHAPE_DRAWERS['pentagon'] = draw_pentagon
-
-# Add to config.py
-SHAPE_CONFIG = {
-    'types': ['circle', 'square', 'rectangle', 'triangle', 'pentagon'],
-    ...
-}
-```
+**AnnotationLoader** (`get_annotations.py`):
+- Loads GT from original or masked dirs
+- Extracts scene_id from filename
+- Optional fallback for skipped masked images
 
 ## Use Cases
 
@@ -316,17 +419,24 @@ Extract cross-attention maps and compare to ground truth:
 ```
 import json
 from PIL import Image
+from get_annotations import AnnotationLoader
 
 # Load image and annotation
-img = Image.open('output/images/image_00001.png')
-with open('output/annotations/annotation_00001.json') as f:
-    ann = json.load(f)
+loader = AnnotationLoader()
+gt = loader.get_gt('image_00001_masked.png', masked=True)
+img = Image.open('output/masked/images/image_00001_masked.png')
+
+# Check masking/GT
+if 'masking_info' in gt:
+    print(f"Masked: {gt['masking_info']}")
+for rel in gt['relations']:
+    print(f"GT Relation: {rel['subject_id']} {rel['relation']} {rel['object_id']} (explicit: {rel.get('explicit', False)})")
 
 # Extract attention from VLM (e.g., LLaVA, Qwen3-VL)
 attention_maps = extract_attention(model, img, prompt="What is left of the red circle?")
 
 # Compute metrics
-for entity in ann['entities']:
+for entity in gt['entities']:
     bbox = entity['bbox']
     com_distance = compute_com_distance(attention_maps, bbox)
     iou = compute_iou(attention_maps, bbox)
@@ -334,43 +444,47 @@ for entity in ann['entities']:
 
 ### 2. Activation Patching Experiments
 
-Generate clean/corrupted pairs:
+Generate clean/corrupted pairs with masking:
 
 ```
-# Modify generate_dataset.py to create pairs
-clean_scene = {'num_entities': 2}  # Simple
-corrupted_scene = {'num_entities': 5}  # Complex
+# Use masking for corruption
+clean_gt = loader.get_gt('image_00001.png', masked=False)
+masked_gt = loader.get_gt('image_00001.png', masked=True)
 
-clean_img, clean_entities = generate_scene(clean_scene)
-corrupted_img, corrupted_entities = generate_scene(corrupted_scene)
+clean_img = Image.open('output/images/image_00001.png')
+masked_img = Image.open('output/masked/images/image_00001_masked.png')
 
-# Run patching experiments
-patch_layer_8(clean_activations, corrupted_run)
+# Run patching
+patch_layer_8(clean_activations, masked_run)  # Mask as corruption
 ```
 
-### 3. Ablation Studies
+### 3. Ablation Studies with VLM Testing
 
-Test component importance:
+Test masking impact on relational accuracy:
 
 ```
-# Generate dataset with specific constraints
-# No arrows (all implicit)
-RELATION_CONFIG['explicit_ratio'] = 0.0
+# Single-image ablation (use test_single_image.py)
+python test_single_image.py --image_filename image_00001.png --both
 
-# Only circles and squares
-SHAPE_CONFIG['types'] = ['circle', 'square']
+# Analyze: Compare acc in CSV (e.g., masked explicit relations drop?)
+# GT prompts from relations: Expect 100% unmasked → lower if arrow-reliant
 
-# Large entities only
-SHAPE_CONFIG['sizes'] = {'large': 40}
+# Batch over test split
+python evaluate_relations.py --img_dir output/masked/images --ann_dir output/masked/annotations --max_samples 100
 ```
 
 ## Dataset Statistics
 
-**Per-image Statistics** (average over 1000 images):
+**Per-image Statistics** (average over 1000 original images):
 - Entities: 3.5 ± 1.2
 - Relations: 6.1 ± 3.8 (all pairwise)
 - Explicit relations: 3.0 ± 1.9 (48-52% with random variation)
 - Implicit relations: 3.1 ± 1.9
+
+**Masked Statistics** (~995 images):
+- Valid scenes: 995 (skips 5 with <2 entities)
+- Object masks: ~50% (avg 1 entity + 1-2 relations removed)
+- Relation masks: ~50% (1 flagged; explicit → no arrow)
 
 **Attribute Distributions**:
 - Shapes: ~25% each (circle, square, rectangle, triangle)
@@ -389,7 +503,7 @@ SHAPE_CONFIG['sizes'] = {'large': 40}
 Run validation on sample images:
 
 ```
-# Check annotation correctness
+# Check annotation correctness (original + masked)
 def validate_annotation(img_path, ann_path):
     img = Image.open(img_path)
     with open(ann_path) as f:
@@ -409,6 +523,17 @@ def validate_annotation(img_path, ann_path):
         assert rel['subject_id'] < len(ann['entities'])
         assert rel['object_id'] < len(ann['entities'])
         assert rel['relation'] in ['left_of', 'right_of', 'above', 'below']
+    
+    # Masked-specific: Validate masking_info
+    if 'masking_info' in ann:
+        info = ann['masking_info']
+        assert info['type'] in ['object', 'relation']
+        if info['type'] == 'relation':
+            masked_rel = ann['relations'][info['masked_item']['relation_index']]
+            assert masked_rel.get('masked', False)
+
+# Quick test with loader + VLM script
+python test_single_image.py --image_filename image_00001.png  # Validates GT + prompts
 ```
 
 ### Known Limitations
@@ -418,6 +543,8 @@ def validate_annotation(img_path, ann_path):
 3. **Limited shape variety**: 4 basic geometric primitives
 4. **Axis-aligned placement**: No rotation or orientation variation
 5. **Uniform distribution**: No semantic clustering or real-world layouts
+6. **Masking Skips**: ~0.5% degenerate scenes skipped (use loader fallback)
+7. **Straight Arrows**: No curved paths (deterministic from centers)
 
 These limitations are intentional to ensure **controlled complexity** for interpretability research.
 
@@ -448,6 +575,7 @@ This dataset generator is inspired by the CLEVR dataset methodology:
 Key adaptations:
 - Simplified from 3D (Blender) to 2D (Pillow)
 - Added explicit/implicit relation distinction
+- Masking ablation for robustness probing
 - Optimized for VLM attention analysis
 - Reduced entity count for focused interpretability
 
@@ -460,9 +588,22 @@ For questions, issues, or contributions:
 
 ## Version History
 
+**v1.2** (November 2025)
+- Added VLM evaluation scripts (single-image tester with GT prompts)
+- Usage: Params/outputs for testing; GT explanation (dynamic from annotations)
+- Enhanced use cases: Ablation with masking comparison
+
+**v1.1** (November 2025)
+- Added masking ablation pipeline (object/relation masking, re-rendering)
+- AnnotationLoader for GT handling (with fallback for skips)
+- Updated structure: masked subdir, masking_info in JSON
+- Statistics: ~995 masked images
+- Enhanced use cases for ablation studies
+
 **v1.0** (November 2025)
 - Initial release
 - 1000 image generation pipeline
 - 4 shape types, 8 colors, 3 sizes
 - Explicit/implicit relation support
 - Complete JSON annotations
+
