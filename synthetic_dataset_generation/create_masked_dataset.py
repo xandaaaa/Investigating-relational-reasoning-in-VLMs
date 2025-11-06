@@ -1,27 +1,22 @@
 """
-Enhanced masked dataset script: Re-renders scenes cleanly to avoid arrow-object bleeding.
-- Builds new image from annotations: Draw entities + non-masked explicit arrows.
-- No patching; precise omission of masked parts.
-Run: python create_masked_dataset.py [--num_images N] [--sample_id ID] [--seed S] [--mode clean_arrows]
-(Note: --mode now affects only logging; re-rendering is always clean.)
+create_masked_dataset.py: Fixed for string-based GT (map 'size'/'color' str → numeric/RGB).
+- Uses SHAPE_CONFIG['sizes'] for "large" → 40, etc.
+- COLOR_STR_TO_RGB from utils.get_color_name inverse.
+- Now handles your annotation format exactly.
 """
 import json
 import random
-import argparse
-import math
 from pathlib import Path
-from tqdm import tqdm
 from PIL import Image, ImageDraw
-import numpy as np
+from tqdm import tqdm
 
-BACKGROUND_COLOR = (255, 255, 255)  # White
-IMAGE_SIZE = (224, 224)
-ARROW_WIDTH = 2
-OUTLINE_COLOR = (0, 0, 0)
-OUTLINE_WIDTH = 1
+# Imports from your codebase
+from shapes import SHAPE_DRAWERS, draw_arrow  # Drawing
+from config import RELATION_CONFIG, SHAPE_CONFIG  # arrow config + sizes
+from get_groundtruth_annotations import AnnotationLoader  # Load GT
 
-# Color mapping (RGB tuples; add more if needed from 8 colors in README)
-COLOR_MAP = {
+# RGB map from color str (inverse of utils.get_color_name)
+COLOR_STR_TO_RGB = {
     'red': (255, 0, 0),
     'green': (0, 255, 0),
     'blue': (0, 0, 255),
@@ -29,230 +24,142 @@ COLOR_MAP = {
     'magenta': (255, 0, 255),
     'cyan': (0, 255, 255),
     'purple': (128, 0, 128),
-    'orange': (255, 165, 0),
+    'orange': (255, 128, 0),
 }
 
-# Size mapping (diameter/side in pixels)
-SIZE_MAP = {'small': 20, 'medium': 30, 'large': 40}
-
-def load_image_and_annotation(scene_id, output_dir):
-    """Load JSON annotation (image not needed; we'll re-render)."""
-    ann_path = output_dir / 'annotations' / f'annotation_{scene_id:05d}.json'
-    if not ann_path.exists():
-        return None
-    with open(ann_path, 'r') as f:
-        ann = json.load(f)
-    return ann
-
-def draw_shape(draw, shape, size_str, color_name, center, size_map=SIZE_MAP, color_map=COLOR_MAP):
-    """Draw a single shape at center with given attributes."""
-    x, y = center
-    size = size_map[size_str]
-    color = color_map.get(color_name, (128, 128, 128))  # Fallback gray
-    
-    if shape == 'circle':
-        radius = size // 2
-        bbox = (x - radius, y - radius, x + radius, y + radius)
-        draw.ellipse(bbox, fill=color, outline=OUTLINE_COLOR, width=OUTLINE_WIDTH)
-    elif shape == 'square':
-        half = size // 2
-        bbox = (x - half, y - half, x + half, y + half)
-        draw.rectangle(bbox, fill=color, outline=OUTLINE_COLOR, width=OUTLINE_WIDTH)
-    elif shape == 'rectangle':
-        half_w = size // 2
-        half_h = (size * 1.5) // 2
-        bbox = (x - half_w, y - half_h, x + half_w, y + half_h)
-        draw.rectangle(bbox, fill=color, outline=OUTLINE_COLOR, width=OUTLINE_WIDTH)
-    elif shape == 'triangle':
-        height = int(size * math.sqrt(3) / 2)
-        half_base = size // 2
-        points = [
-            (x, y - height // 2),  # Top
-            (x - half_base, y + height // 2),
-            (x + half_base, y + height // 2)
-        ]
-        draw.polygon(points, fill=color, outline=OUTLINE_COLOR, width=OUTLINE_WIDTH)
-
-def draw_arrow(draw, subj_center, obj_center):
-    """Draw a straight arrow: Line + triangular head."""
-    start = tuple(subj_center)
-    end = tuple(obj_center)
-    # Line
-    draw.line([start, end], fill=OUTLINE_COLOR, width=ARROW_WIDTH)
-    # Arrowhead
-    dx, dy = end[0] - start[0], end[1] - start[1]
-    length = math.sqrt(dx**2 + dy**2)
-    if length > 0:
-        ux, uy = dx / length, dy / length
-        px, py = -uy * 10, ux * 10  # Perp vectors for triangle
-        head_points = [
-            end,
-            (end[0] - ux * 10 + px, end[1] - uy * 10 + py),
-            (end[0] - ux * 10 - px, end[1] - uy * 10 - py)
-        ]
-        draw.polygon(head_points, fill=OUTLINE_COLOR, outline=OUTLINE_COLOR, width=1)
-
-def render_scene(entities, relations, width=224, height=224):
-    """Re-render clean scene: Background + shapes + non-masked explicit arrows."""
-    img = Image.new('RGB', (width, height), BACKGROUND_COLOR)
+def re_render_masked_scene(original_gt: dict, mask_type: str, masked_item: dict, output_img_path: str, output_ann_path: str):
+    """Re-render: Map GT strings to numeric/RGB; use SHAPE_DRAWERS/draw_arrow."""
+    img_size = (224, 224)
+    img = Image.new('RGB', img_size, color=(255, 255, 255))  # White BG
     draw = ImageDraw.Draw(img)
     
-    # Draw all entities
-    for entity in entities:
-        draw_shape(draw, entity['shape'], entity['size'], entity['color'], entity['center'])
+    # Copy lists & apply mask (same as before)
+    masked_entities = original_gt['entities'].copy()
+    masked_relations = original_gt['relations'].copy()
     
-    # Draw arrows for explicit, non-masked relations
-    explicit_drawn = 0
-    for rel in relations:
+    if mask_type == 'object':
+        entity_id = masked_item['entity_id']
+        masked_entities = [e for e in masked_entities if e['id'] != entity_id]
+        masked_relations = [r for r in masked_relations 
+                            if r['subject_id'] != entity_id and r['object_id'] != entity_id]
+    else:  # relation
+        rel_index = masked_item['relation_index']
+        if 0 <= rel_index < len(masked_relations):
+            masked_relations[rel_index]['masked'] = True
+    
+    # Re-draw remaining entities (map strings!)
+    for entity in masked_entities:
+        center = tuple(entity['center'])  # [x,y] → (x,y)
+        size_str = entity['size']  # "large"
+        shape = entity['shape']  # "square"
+        color_str = entity['color']  # "cyan"
+        
+        # Map to drawing params
+        numeric_size = SHAPE_CONFIG['sizes'][size_str]  # "large" → 40
+        color_rgb = COLOR_STR_TO_RGB[color_str]  # "cyan" → (0,255,255)
+        
+        if shape in SHAPE_DRAWERS:
+            bbox_list = SHAPE_DRAWERS[shape](draw, center, numeric_size, color_rgb)
+            # Update GT bbox (from draw return; matches original)
+            entity['bbox'] = {
+                'x_min': int(bbox_list[0]), 'y_min': int(bbox_list[1]),
+                'x_max': int(bbox_list[2]), 'y_max': int(bbox_list[3])
+            }
+            print(f"  Drew {shape} {size_str} {color_str}: size={numeric_size}, bbox={entity['bbox']}")
+        else:
+            print(f"⚠️ Unknown shape '{shape}' for ID {entity['id']}; skipped")
+    
+    # Re-draw non-masked explicit arrows
+    for rel in masked_relations:
         if rel.get('explicit', False) and not rel.get('masked', False):
-            subj = next(e for e in entities if e['id'] == rel['subject_id'])
-            obj = next(e for e in entities if e['id'] == rel['object_id'])
-            draw_arrow(draw, subj['center'], obj['center'])
-            explicit_drawn += 1
+            subj_id, obj_id = rel['subject_id'], rel['object_id']
+            subj_entity = next((e for e in masked_entities if e['id'] == subj_id), None)
+            obj_entity = next((e for e in masked_entities if e['id'] == obj_id), None)
+            if subj_entity and obj_entity:
+                start = tuple(subj_entity['center'])
+                end = tuple(obj_entity['center'])
+                draw_arrow(
+                    draw, start, end,
+                    color=RELATION_CONFIG['arrow_color'],  # (0,0,0)
+                    width=RELATION_CONFIG['arrow_width']   # 2
+                )
     
-    print(f"🖼️ Re-rendered: {len(entities)} entities, {explicit_drawn} explicit arrows drawn")
-    return img
-
-def filter_relations_for_object(relations, entity_id):
-    """Remove relations connected to entity_id."""
-    connected_rels = [r for r in relations if r['subject_id'] == entity_id or r['object_id'] == entity_id]
-    return [r for r in relations if r not in connected_rels], len(connected_rels)
-
-def main(num_images=None, sample_id=None, seed=42, mode='clean_arrows'):
-    output_dir = Path('output')
-    masked_dir = output_dir / 'masked'
-    masked_dir.mkdir(exist_ok=True)
+    # Save image
+    img.save(output_img_path)
     
+    # Update GT
+    original_gt['num_entities'] = len(masked_entities)
+    original_gt['entities'] = masked_entities
+    original_gt['relations'] = masked_relations
+    original_gt['image_filename'] = Path(output_img_path).name
+    original_gt['masking_info'] = {
+        'type': mask_type,
+        'masked_item': masked_item
+    }
+    with open(output_ann_path, 'w') as f:
+        json.dump(original_gt, f, indent=2)
+    
+    print(f"✅ Re-rendered {Path(output_img_path).name}: {len(masked_entities)} entities "
+          f"(mapped str → size/RGB; bboxes updated)")
+
+def main(num_images=1000, seed=42, base_dir='output'):
+    """Main loop: Mask random scenes."""
     random.seed(seed)
-    np.random.seed(seed)
+    loader = AnnotationLoader(base_dir=base_dir)
+    masked_img_dir = Path(base_dir) / 'masked' / 'images'
+    masked_ann_dir = Path(base_dir) / 'masked' / 'annotations'
+    masked_img_dir.mkdir(parents=True, exist_ok=True)
+    masked_ann_dir.mkdir(parents=True, exist_ok=True)
     
-    # Load original metadata
-    metadata_path = output_dir / 'metadata.json'
-    if not metadata_path.exists():
-        raise FileNotFoundError(f"Metadata not found: {metadata_path}")
-    
-    with open(metadata_path, 'r') as f:
-        original_metadata = json.load(f)
-    
-    total_images = original_metadata.get('num_images', 0)
-    if total_images == 0:
-        raise ValueError("No images in metadata")
-    
-    # Determine processing
-    if sample_id is not None:
-        num_images = 1
-        scene_ids = [sample_id]
-        print(f"🧪 Testing on sample image_id: {sample_id}")
-    elif num_images is None:
-        num_images = total_images
-        scene_ids = list(range(num_images))
-    else:
-        num_images = min(num_images, total_images)
-        scene_ids = list(range(num_images))
-    
-    print(f"🎭 Starting Clean Re-Rendered Masked Dataset (Seed: {seed}) for {len(scene_ids)} images...")
-    print(f"📁 Original: {output_dir}")
-    print(f"📁 Masked Output: {masked_dir}")
-    
-    processed_count = 0
-    for scene_id in tqdm(scene_ids, desc="Masking & Rendering"):
-        ann = load_image_and_annotation(scene_id, output_dir)
-        if ann is None:
-            print(f"⚠️ Skipping {scene_id}: Missing annotation")
+    processed = 0
+    skipped = 0
+    for scene_id in tqdm(range(num_images), desc="Masking scenes"):
+        image_filename = f"image_{scene_id:05d}.png"
+        gt = loader.get_gt(image_filename, masked=False)
+        if not gt or len(gt['entities']) < 2:
+            skipped += 1
             continue
         
-        entities = ann['entities'][:]  # Copy
-        relations = ann['relations'][:]  # Copy
-        num_entities = len(entities)
+        mask_type = random.choice(['object', 'relation'])
+        if mask_type == 'object':
+            masked_item = {'entity_id': random.choice([e['id'] for e in gt['entities']])}
+            remaining_entities = len(gt['entities']) - 1
+        else:
+            rel_index = random.randint(0, len(gt['relations']) - 1)
+            masked_item = {
+                'relation_index': rel_index,
+                'relation': gt['relations'][rel_index]['relation'],
+                'was_explicit': gt['relations'][rel_index].get('explicit', False)
+            }
+            remaining_entities = len(gt['entities'])
         
-        if num_entities < 2:
-            print(f"⚠️ Skipping {scene_id}: Too few entities ({num_entities})")
+        if remaining_entities < 2:
+            skipped += 1
             continue
         
-        masking_type = random.choice(['object', 'relation'])
-        masked_item = {}
-        masked_entities = entities
-        masked_relations = relations
+        out_img = masked_img_dir / f"image_{scene_id:05d}_masked.png"
+        out_ann = masked_ann_dir / f"annotation_{scene_id:05d}_masked.json"
         
-        if masking_type == 'object':
-            entity_id = random.randint(0, num_entities - 1)
-            masked_entities = [e for e in entities if e['id'] != entity_id]
-            masked_relations, cleared_count = filter_relations_for_object(relations, entity_id)
-            masked_item = {'entity_id': entity_id, 'cleared_relations': cleared_count}
-            if cleared_count > 0:
-                print(f"📝 Object mask: Removed entity {entity_id}, cleared {cleared_count} relations")
-            
-        else:  # 'relation'
-            explicit_rels = [i for i, r in enumerate(relations) if r.get('explicit', False)]
-            if not explicit_rels:
-                # Fallback to implicit or object
-                all_rel_indices = list(range(len(relations)))
-                if all_rel_indices:
-                    rel_index = random.choice(all_rel_indices)
-                    masked_relations[rel_index]['masked'] = True
-                    rel = masked_relations[rel_index]
-                    masked_item = {'relation_index': rel_index, 'was_explicit': False, 'relation': rel['relation']}
-                    print(f"📝 Relation mask: Flagged implicit '{rel['relation']}' at {rel_index}")
-                else:
-                    print(f"⚠️ {scene_id}: No relations, fallback to object")
-                    entity_id = random.randint(0, num_entities - 1)
-                    masked_entities = [e for e in entities if e['id'] != entity_id]
-                    masked_relations, cleared_count = filter_relations_for_object(relations, entity_id)
-                    masked_item = {'entity_id': entity_id, 'cleared_relations': cleared_count}
-                    masking_type = 'object'
-            else:
-                rel_index = random.choice(explicit_rels)
-                masked_relations[rel_index]['masked'] = True
-                rel = masked_relations[rel_index]
-                masked_item = {'relation_index': rel_index, 'was_explicit': True, 'relation': rel['relation']}
-                print(f"📝 Relation mask: Flagged explicit '{rel['relation']}' at {rel_index}")
-        
-        # Re-render the masked scene
-        img = render_scene(masked_entities, masked_relations)
-        
-        # Update annotation
-        new_ann = ann.copy()
-        new_ann['entities'] = masked_entities
-        new_ann['relations'] = masked_relations
-        new_ann['num_entities'] = len(masked_entities)
-        new_ann['masking_info'] = {
-            'type': masking_type,
-            'masked_item': masked_item
-        }
-        
-        # Save
-        img_dir = masked_dir / 'images'
-        ann_dir = masked_dir / 'annotations'
-        img_dir.mkdir(exist_ok=True, parents=True)
-        ann_dir.mkdir(exist_ok=True, parents=True)
-        
-        masked_filename = f'image_{scene_id:05d}_masked.png'
-        img.save(img_dir / masked_filename)
-        
-        masked_ann_filename = f'annotation_{scene_id:05d}_masked.json'
-        with open(ann_dir / masked_ann_filename, 'w') as f:
-            json.dump(new_ann, f, indent=2)
-        
-        processed_count += 1
+        re_render_masked_scene(gt, mask_type, masked_item, str(out_img), str(out_ann))
+        processed += 1
     
-    # Metadata
-    metadata = original_metadata.copy()
-    metadata['dataset_name'] += ' (Re-Rendered Masked)'
-    metadata['masked'] = True
-    metadata['num_images'] = len(scene_ids)
-    with open(masked_dir / 'masked_metadata.json', 'w') as f:
-        json.dump(metadata, f, indent=2)
+    # Masked metadata
+    masked_metadata = {
+        'num_masked_images': processed,
+        'skipped': skipped,
+        'mask_types': {'object': processed // 2, 'relation': processed - processed // 2}
+    }
+    with open(Path(base_dir) / 'masked' / 'masked_metadata.json', 'w') as f:
+        json.dump(masked_metadata, f, indent=2)
     
-    print(f"✅ Re-rendering complete! Processed {processed_count}/{len(scene_ids)} images (no overlaps/bleeding).")
-    print(f"   - Images: {masked_dir / 'images'}")
-    print(f"   - Annotations: {masked_dir / 'annotations'}")
-    print(f"   - Metadata: {masked_dir / 'masked_metadata.json'}")
+    print(f"✅ Complete: {processed}/{num_images} masked images (skipped {skipped}). "
+          f"Fixed str mapping for size/color – visuals now match originals!")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Generate re-rendered masked dataset")
-    parser.add_argument('--num_images', type=int, default=None, help="Number of images")
-    parser.add_argument('--sample_id', type=int, default=None, help="Test specific image_id")
-    parser.add_argument('--seed', type=int, default=42, help="Random seed")
-    parser.add_argument('--mode', type=str, default='clean_arrows', help="Legacy mode (ignored in re-render)")
+    import argparse
+    parser = argparse.ArgumentParser(description="Create masked dataset (fixed for str GT)")
+    parser.add_argument("--num_images", type=int, default=1000)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--base_dir", default="output")
     args = parser.parse_args()
-    main(args.num_images, args.sample_id, args.seed, args.mode)
+    main(args.num_images, args.seed, args.base_dir)
