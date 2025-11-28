@@ -57,12 +57,22 @@ def run_vlm_with_attention(model, processor, image, question: str, device="cuda"
         skip_special_tokens=True, 
         clean_up_tokenization_spaces=False
     )[0]
+
+    decoded_input_tokens = processor.tokenizer.convert_ids_to_tokens(
+        inputs.input_ids[0].tolist()
+    )
+
+    decoded_generated_tokens = processor.tokenizer.convert_ids_to_tokens(
+        outputs.sequences[0].tolist()
+    )
     
     # Extract attention weights
     attention_data = {
-        'attentions': outputs.attentions if hasattr(outputs, 'attentions') else None,
-        'input_ids': inputs.input_ids.cpu(),
-        'generated_ids': outputs.sequences.cpu(),
+        "attentions": outputs.attentions if hasattr(outputs, "attentions") else None,
+        "input_ids": inputs.input_ids.cpu(),
+        "generated_ids": outputs.sequences.cpu(),
+        "decoded_input_tokens": decoded_input_tokens,
+        "decoded_generated_tokens": decoded_generated_tokens,
     }
     
     return output_text, attention_data
@@ -99,12 +109,21 @@ def save_attention_maps(attention_data, save_dir, image_name, query_idx, is_mask
                     layer_attn.cpu().float().numpy()  # ← FIX: Convert BFloat16 to Float32
                 )
     
+    input_ids = attention_data["input_ids"][0].tolist()
+    generated_ids = attention_data["generated_ids"][0].tolist()
+    decoded_input_tokens = attention_data.get("decoded_input_tokens", [])
+    decoded_generated_tokens = attention_data.get("decoded_generated_tokens", [])
+    
     # Save metadata
     metadata = {
-        'num_steps': len(attentions),
-        'num_layers': len(attentions[0]) if attentions and attentions[0] is not None else 0,
-        'input_length': attention_data['input_ids'].shape[1],
-        'output_length': attention_data['generated_ids'].shape[1],
+        "num_steps": len(attentions),
+        "num_layers": len(attentions[0]) if attentions and attentions[0] is not None else 0,
+        "input_length": len(input_ids),
+        "output_length": len(generated_ids),
+        "input_ids": input_ids,
+        "generated_ids": generated_ids,
+        "decoded_input_tokens": decoded_input_tokens,
+        "decoded_generated_tokens": decoded_generated_tokens,
     }
     with open(img_dir / f"q{query_idx}_metadata.json", 'w') as f:
         json.dump(metadata, f, indent=2)
