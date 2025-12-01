@@ -6,8 +6,8 @@ import json
 import textwrap
 
 # ---- CONFIG ----
-IMAGE_ID = 30
-QUESTION_NR = "q7"
+IMAGE_ID = 0
+QUESTION_NR = "q0"
 
 IMAGE_NAME = f"image_{IMAGE_ID:05d}"  # -> "image_00030"
 
@@ -52,150 +52,361 @@ def compute_entropy(att_heads: np.ndarray) -> np.ndarray:
     entropy = -(probs * np.log(probs + 1e-12)).sum(axis=-1)
     return entropy  # shape [num_heads]
 
-
 def get_vision_token_range(meta: dict) -> tuple[int, int]:
-    # Find indices of <|vision_start|> and <|vision_end|> tokens in decoded_input_tokens.
+    """
+    Extract vision token indices from metadata.
+    Returns (patch_start, patch_end) for the <|image_pad|> placeholders.
+    """
     tokens = meta["decoded_input_tokens"]
-
+    
     v_start = tokens.index("<|vision_start|>")
     v_end = tokens.index("<|vision_end|>")
+    
+    patch_start = v_start + 1  # Skip the <|vision_start|> marker
+    patch_end = v_end          # Stop before <|vision_end|>
+    
+    print(f"📍 Vision range: [{patch_start}:{patch_end}] = {patch_end - patch_start} tokens")
+    
+    return patch_start, patch_end
 
-    v_start = v_start + 1
 
-    # just for debugging
-    #  
-    row, col = 0 , 7              
-    flat_idx = row * 8 + col      
-    token_idx = v_start + flat_idx
+def compute_entropy(att_heads: np.ndarray) -> np.ndarray:
+    """
+    Compute entropy for attention distribution.
+    
+    Args:
+        att_heads: [num_heads, num_patches] attention weights
+    
+    Returns:
+        entropy_per_head: [num_heads] entropy values
+    """
+    # Normalize to probabilities
+    probs = att_heads / (att_heads.sum(axis=-1, keepdims=True) + 1e-12)
+    
+    # Compute entropy: -sum(p * log(p))
+    entropy = -(probs * np.log(probs + 1e-12)).sum(axis=-1)
+    
+    return entropy
 
-    print(meta["decoded_input_tokens"][token_idx])
-
-    print(v_start)
-    print(v_end)
-
-    return v_start, v_end
 
 def plot_maxpool_layers(question_id: str = "q0"):
-    # Load metadata (token mapping etc.)
+    """
+    Plot max-pooled attention maps across all 36 layers with entropy.
+    Uses LAST generation step (final answer token) for most focused attention.
+    """
+    # ===== LOAD METADATA =====
     with open(METADATA_PATH) as f:
         meta = json.load(f)
 
-    # Get patch range: vision_start+1 .. vision_end (exclude markers)
-    tokens = meta["decoded_input_tokens"]
-    v_start = tokens.index("<|vision_start|>")
-    v_end = tokens.index("<|vision_end|>")
-    patch_start = v_start + 1
-    patch_end = v_end
-    num_patches = patch_end - patch_start  # should be 64
-    grid_size = int(np.sqrt(num_patches))  # should be 8
+    # ===== GET VISION TOKEN RANGE =====
+    patch_start, patch_end = get_vision_token_range(meta)
+    num_patches = patch_end - patch_start  # Should be 64
+    grid_size = int(np.sqrt(num_patches))  # Should be 8
+    
+    if grid_size * grid_size != num_patches:
+        print(f"⚠️ Warning: {num_patches} is not a perfect square!")
+        grid_size = int(np.ceil(np.sqrt(num_patches)))
+    
+    print(f"📊 Grid size: {grid_size}×{grid_size}")
 
+    # ===== USE LAST STEP (FINAL ANSWER TOKEN) =====
+    last_step = meta["num_steps"] - 1
+    last_step = 4
+    print(f"📊 Using step {last_step} (last generation step - final answer)")
+
+    # ===== SETUP OUTPUT AND LOAD IMAGE =====
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     img = np.array(Image.open(IMAGE_PATH))
 
+    # ===== CREATE FIGURE =====
     fig = plt.figure(figsize=(24, 20), facecolor="#1a1a1a")
 
-    # Get question text (skip the "q" prefix)
-    question_idx = int(question_id[1:])
+    # ===== GET QUESTION TEXT =====
+    question_idx = int(question_id[1:])  # "q7" → 7
     question_text, query_type, answer = get_question_text(question_idx)
 
-    # Original image at top-left
+    # ===== PLOT ORIGINAL IMAGE (TOP-LEFT) =====
     ax_img = fig.add_axes([0.02, 0.72, 0.12, 0.22])
     ax_img.imshow(img)
-    ax_img.set_title("Original\nImage", color="white")
+    ax_img.set_title("Original\nImage", color="white", fontsize=10)
     ax_img.axis("off")
 
-    # Question + answer box
+    # ===== PLOT QUESTION BOX =====
+    import textwrap
     wrapped_question = textwrap.fill(f"Q: {question_text}", width=25)
     wrapped_answer = textwrap.fill(f"A: {answer}", width=25)
     full_text = f"{wrapped_question}\n\n{wrapped_answer}"
 
     fig.text(
-        0.08,
-        0.6,
+        0.08, 0.6,
         full_text,
         ha="center",
         color="white",
+        fontsize=9,
         bbox=dict(boxstyle="round,pad=0.5", facecolor="#333333", edgecolor="white"),
     )
 
+    # ===== PROCESS ALL LAYERS =====
     heatmaps = []
-    layer_entropies = []  # store per-layer mean entropy
+    layer_entropies = []
 
-    # ----- build heatmaps + entropy for each layer -----
     for layer in range(36):
-        filepath = ATTENTION_DIR / f"{question_id}_step0_layer{layer}.npy"
+        filepath = ATTENTION_DIR / f"{question_id}_step{last_step}_layer{layer}.npy"
+        
         if not filepath.exists():
-            print(f"Warning: {filepath} not found, skipping")
+            print(f"⚠️ {filepath} not found, skipping layer {layer}")
             heatmaps.append(None)
             layer_entropies.append(None)
             continue
 
-        data = np.load(filepath)  # [1, num_heads, S, S]
-        # take first (and only) batch
-        att = data[0]  # [num_heads, S, S]
+        # ===== LOAD ATTENTION =====
+        data = np.load(filepath)  # Can be [1,32,128,128] or [1,32,1,132]
+        
+        # ===== HANDLE BOTH SHAPES =====
+        if data.shape[2] == 1:
+            # Autoregressive generation: [1, 32, 1, past_seq_len]
+            # The 1 new token attends to all past tokens
+            att_to_vision = data[0, :, 0, patch_start:patch_end]  # [32, 64]
+        else:
+            # Full attention: [1, 32, seq, seq]
+            # Take last token's attention to vision
+            att_to_vision = data[0, :, -1, patch_start:patch_end]  # [32, 64]
+        
+        # Sanity check
+        if att_to_vision.shape != (32, num_patches):
+            print(f"⚠️ Layer {layer}: Unexpected shape {att_to_vision.shape}")
+            heatmaps.append(None)
+            layer_entropies.append(None)
+            continue
 
-        # last-token attention: heads x patches
-        att_heads = att[:, -1, patch_start:patch_end]  # [num_heads, 64]
-
-        # ---- entropy per head, then mean per layer ----
-        head_ent = compute_entropy(att_heads)          # [num_heads]
+        # ===== COMPUTE ENTROPY PER HEAD =====
+        head_ent = compute_entropy(att_to_vision)  # [32]
         mean_ent = float(head_ent.mean())
         layer_entropies.append(mean_ent)
 
-        # ---- heatmap: max over heads, then reshape 8x8 ----
-        last_token_attn = att_heads.max(axis=0)        # [64]
-        heatmap = last_token_attn.reshape(grid_size, grid_size)
+        # ===== MAX POOL ACROSS HEADS =====
+        max_pooled = att_to_vision.max(axis=0)  # [64]
+        
+        # ===== RESHAPE TO GRID =====
+        if grid_size * grid_size == num_patches:
+            heatmap = max_pooled.reshape(grid_size, grid_size)
+        else:
+            # Pad if needed
+            padded = np.zeros(grid_size * grid_size)
+            padded[:num_patches] = max_pooled
+            heatmap = padded.reshape(grid_size, grid_size)
 
-        # normalize for visualization
+        # ===== NORMALIZE FOR VISUALIZATION =====
         p_low, p_high = np.percentile(heatmap, [2, 98])
         heatmap_clipped = np.clip(heatmap, p_low, p_high)
         heatmap_norm = (heatmap_clipped - p_low) / (p_high - p_low + 1e-8)
+        
         heatmaps.append(heatmap_norm)
 
-    # ----- plot all 36 layers -----
+    # ===== PLOT ALL 36 LAYERS IN GRID =====
     last_im = None
+    
     for layer, heatmap in enumerate(heatmaps):
         if heatmap is None:
             continue
 
+        # Calculate position in 6×6 grid
         row, col = divmod(layer, 6)
         left = 0.16 + col * 0.14
         bottom = 0.82 - row * 0.155
         ax = fig.add_axes([left, bottom, 0.12, 0.12])
 
-        im = ax.imshow(heatmap, cmap="viridis")
+        # Plot heatmap
+        im = ax.imshow(heatmap, cmap="viridis", interpolation='nearest')
         last_im = im
 
-        # Overlay: show layer + mean entropy
+        # Add title with layer number and entropy
         H = layer_entropies[layer]
-        ax.set_title(f"L{layer}\nH={H:.2f}", color="white", fontsize=8)
+        if H is not None:
+            ax.set_title(f"L{layer}\nH={H:.2f}", color="white", fontsize=8)
+        else:
+            ax.set_title(f"L{layer}", color="white", fontsize=8)
+        
         ax.axis("off")
 
-        # Optional: tiny entropy label inside the map
-        # ax.text(
-        #     0.02, 0.98, f"H={H:.2f}",
-        #     color="white",
-        #     fontsize=6,
-        #     ha="left", va="top",
-        #     transform=ax.transAxes,
-        # )
-
-    # Colorbar using last image handle
+    # ===== ADD COLORBAR =====
     if last_im is not None:
         cbar_ax = fig.add_axes([0.98, 0.15, 0.015, 0.7])
         cbar = fig.colorbar(last_im, cax=cbar_ax)
         cbar.ax.tick_params(colors="white")
-        cbar.set_label("Attention", color="white")
+        cbar.set_label("Attention", color="white", fontsize=10)
 
+    # ===== ADD TITLE =====
     plt.suptitle(
-        f"Max-Pooled Attention (Last Token → Vision Patches)\nwith Per-Layer Mean Entropy",
+        f"Max-Pooled Attention (Last Token → Vision)\n"
+        f"Step {last_step} (Final Answer) | Per-Layer Mean Entropy",
         fontsize=16,
         color="white",
+        y=0.98
     )
-    out_path = OUTPUT_DIR / f"all_layers_max_{question_id}_step0_entropy.png"
-    plt.savefig(out_path, bbox_inches="tight")
+
+    # ===== SAVE =====
+    out_path = OUTPUT_DIR / f"all_layers_max_{question_id}_step{last_step}_entropy.png"
+    plt.savefig(out_path, bbox_inches="tight", dpi=150, facecolor='#1a1a1a')
     plt.close()
-    print(f"Saved: {out_path}")
+    
+    print(f"✅ Saved: {out_path}")
+    
+    # ===== PRINT ENTROPY STATS =====
+    valid_entropies = [e for e in layer_entropies if e is not None]
+    if valid_entropies:
+        print(f"\n📊 Entropy Statistics:")
+        print(f"   Mean: {np.mean(valid_entropies):.2f}")
+        print(f"   Min:  {np.min(valid_entropies):.2f} (layer {np.argmin(valid_entropies)})")
+        print(f"   Max:  {np.max(valid_entropies):.2f} (layer {np.argmax(valid_entropies)})")
+        print(f"   Top 5 lowest entropy layers: {np.argsort(valid_entropies)[:5]}")
+
+
+
+
+# def get_vision_token_range(meta: dict) -> tuple[int, int]:
+#     # Find indices of <|vision_start|> and <|vision_end|> tokens in decoded_input_tokens.
+#     tokens = meta["decoded_input_tokens"]
+
+#     v_start = tokens.index("<|vision_start|>")
+#     v_end = tokens.index("<|vision_end|>")
+
+#     v_start = v_start + 1
+
+#     # just for debugging
+#     #  
+#     row, col = 0 , 7              
+#     flat_idx = row * 8 + col      
+#     token_idx = v_start + flat_idx
+
+#     print(meta["decoded_input_tokens"][token_idx])
+
+#     print(v_start)
+#     print(v_end)
+
+#     return v_start, v_end
+
+# def plot_maxpool_layers(question_id: str = "q0"):
+#     # Load metadata (token mapping etc.)
+#     with open(METADATA_PATH) as f:
+#         meta = json.load(f)
+
+#     # Get patch range: vision_start+1 .. vision_end (exclude markers)
+#     tokens = meta["decoded_input_tokens"]
+#     v_start = tokens.index("<|vision_start|>")
+#     v_end = tokens.index("<|vision_end|>")
+#     patch_start = v_start + 1
+#     patch_end = v_end
+#     num_patches = patch_end - patch_start  # should be 64
+#     grid_size = int(np.sqrt(num_patches))  # should be 8
+
+#     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+#     img = np.array(Image.open(IMAGE_PATH))
+
+#     fig = plt.figure(figsize=(24, 20), facecolor="#1a1a1a")
+
+#     # Get question text (skip the "q" prefix)
+#     question_idx = int(question_id[1:])
+#     question_text, query_type, answer = get_question_text(question_idx)
+
+#     # Original image at top-left
+#     ax_img = fig.add_axes([0.02, 0.72, 0.12, 0.22])
+#     ax_img.imshow(img)
+#     ax_img.set_title("Original\nImage", color="white")
+#     ax_img.axis("off")
+
+#     # Question + answer box
+#     wrapped_question = textwrap.fill(f"Q: {question_text}", width=25)
+#     wrapped_answer = textwrap.fill(f"A: {answer}", width=25)
+#     full_text = f"{wrapped_question}\n\n{wrapped_answer}"
+
+#     fig.text(
+#         0.08,
+#         0.6,
+#         full_text,
+#         ha="center",
+#         color="white",
+#         bbox=dict(boxstyle="round,pad=0.5", facecolor="#333333", edgecolor="white"),
+#     )
+
+#     heatmaps = []
+#     layer_entropies = []  # store per-layer mean entropy
+
+#     # ----- build heatmaps + entropy for each layer -----
+#     for layer in range(36):
+#         filepath = ATTENTION_DIR / f"{question_id}_step0_layer{layer}.npy"
+#         if not filepath.exists():
+#             print(f"Warning: {filepath} not found, skipping")
+#             heatmaps.append(None)
+#             layer_entropies.append(None)
+#             continue
+
+#         data = np.load(filepath)  # [1, num_heads, S, S]
+#         # take first (and only) batch
+#         att = data[0]  # [num_heads, S, S]
+
+#         # last-token attention: heads x patches
+#         att_heads = att[:, -1, patch_start:patch_end]  # [num_heads, 64]
+
+#         # ---- entropy per head, then mean per layer ----
+#         head_ent = compute_entropy(att_heads)          # [num_heads]
+#         mean_ent = float(head_ent.mean())
+#         layer_entropies.append(mean_ent)
+
+#         # ---- heatmap: max over heads, then reshape 8x8 ----
+#         last_token_attn = att_heads.max(axis=0)        # [64]
+#         heatmap = last_token_attn.reshape(grid_size, grid_size)
+
+#         # normalize for visualization
+#         p_low, p_high = np.percentile(heatmap, [2, 98])
+#         heatmap_clipped = np.clip(heatmap, p_low, p_high)
+#         heatmap_norm = (heatmap_clipped - p_low) / (p_high - p_low + 1e-8)
+#         heatmaps.append(heatmap_norm)
+
+#     # ----- plot all 36 layers -----
+#     last_im = None
+#     for layer, heatmap in enumerate(heatmaps):
+#         if heatmap is None:
+#             continue
+
+#         row, col = divmod(layer, 6)
+#         left = 0.16 + col * 0.14
+#         bottom = 0.82 - row * 0.155
+#         ax = fig.add_axes([left, bottom, 0.12, 0.12])
+
+#         im = ax.imshow(heatmap, cmap="viridis")
+#         last_im = im
+
+#         # Overlay: show layer + mean entropy
+#         H = layer_entropies[layer]
+#         ax.set_title(f"L{layer}\nH={H:.2f}", color="white", fontsize=8)
+#         ax.axis("off")
+
+#         # Optional: tiny entropy label inside the map
+#         # ax.text(
+#         #     0.02, 0.98, f"H={H:.2f}",
+#         #     color="white",
+#         #     fontsize=6,
+#         #     ha="left", va="top",
+#         #     transform=ax.transAxes,
+#         # )
+
+#     # Colorbar using last image handle
+#     if last_im is not None:
+#         cbar_ax = fig.add_axes([0.98, 0.15, 0.015, 0.7])
+#         cbar = fig.colorbar(last_im, cax=cbar_ax)
+#         cbar.ax.tick_params(colors="white")
+#         cbar.set_label("Attention", color="white")
+
+#     plt.suptitle(
+#         f"Max-Pooled Attention (Last Token → Vision Patches)\nwith Per-Layer Mean Entropy",
+#         fontsize=16,
+#         color="white",
+#     )
+#     out_path = OUTPUT_DIR / f"all_layers_max_{question_id}_step0_entropy.png"
+#     plt.savefig(out_path, bbox_inches="tight")
+#     plt.close()
+#     print(f"Saved: {out_path}")
 
 
 
