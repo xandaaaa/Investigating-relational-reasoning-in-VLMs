@@ -666,7 +666,10 @@ def get_meanpool_output(question_id: str = "q0", attention_dir=ATTENTION_DIR, me
     # mean over steps
     step_stack = np.stack(step_attentions, axis=0)
     mean_over_steps = step_stack.mean(axis=0)
-    
+
+    output_file = output_path / f"{question_id}_meanpool"
+    np.savez(output_file, mean_over_steps=mean_over_steps)
+    print(f"successfully saved {output_file}")
     return mean_over_steps
 
 if __name__ == "__main__":
