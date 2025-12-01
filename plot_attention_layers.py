@@ -15,7 +15,7 @@ ATTENTION_DIR = Path("eval_results/attention_maps") / IMAGE_NAME
 IMAGE_PATH = Path("synthetic_dataset_generation/output/images") / f"{IMAGE_NAME}.png"
 QUERIES_PATH = Path("prompts/queries.json")
 METADATA_PATH = ATTENTION_DIR / f"{QUESTION_NR}_metadata.json"
-OUTPUT_DIR = Path("attention_maps/plots")
+OUTPUT_DIR = Path("attention_maps/output")
 # ----------------
 
 
@@ -616,8 +616,58 @@ def plot_steps(question_id: str = "q0", agg: str = "mean"):
     plt.close()
     print(f"Saved: {out_path}")
 
+def get_meanpool_output(question_id: str = "q0", attention_dir=ATTENTION_DIR, metadata_path=METADATA_PATH, output_path=OUTPUT_DIR):
+
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    with open(metadata_path) as f:
+        meta = json.load(f)
+    vision_start, vision_end = get_vision_token_range(meta)
+    
+    num_steps = meta["num_steps"]
+    num_layers = meta["num_layers"]
+
+    if num_steps == 0:
+        print(f"No attention files found for {question_id}")
+        return
+    
+    step_attentions = []
+    
+    for step in range(num_steps):
+        layer_attentions = []
+        
+        for layer in range(num_layers):
+            filepath = attention_dir / f"{question_id}_step{step}_layer{layer}.npy"
+            if not filepath.exists():
+                print(f"Warning: {filepath} not found, skipping")
+                continue
+            
+            # mean over heads
+            data = np.load(filepath)
+            attn = data.mean(axis=1).squeeze()
+            
+            if attn.ndim == 2:
+                last_token_attn = attn[-1, vision_start:vision_end]
+            else:
+                last_token_attn = attn[vision_start:vision_end]
+            
+            layer_attentions.append(last_token_attn)
+        
+        # mean over layers
+        if layer_attentions:
+            layer_stack = np.stack(layer_attentions, axis=0)
+            mean_over_layers = layer_stack.mean(axis=0)
+            step_attentions.append(mean_over_layers)
+    
+    if not step_attentions:
+        print(f"No valid attention data found for {question_id}")
+        return
+    
+    # mean over steps
+    step_stack = np.stack(step_attentions, axis=0)
+    mean_over_steps = step_stack.mean(axis=0)
+    
+    return mean_over_steps
 
 if __name__ == "__main__":
-    plot_maxpool_layers(QUESTION_NR)
-    plot_steps(QUESTION_NR, agg="mean")
-    plot_steps(QUESTION_NR, agg="max")
+    get_meanpool_output(question_id="q0")
