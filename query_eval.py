@@ -1,5 +1,5 @@
 """
-query_eval.py - Fixed with Eager Attention for Attention Extraction
+query_eval.py - VLM Evaluation with Compact Attention Storage
 """
 print("Importing transformers...", flush=True)
 from transformers import Qwen3VLForConditionalGeneration, AutoProcessor
@@ -20,62 +20,6 @@ from collections import defaultdict
 from pathlib import Path
 
 
-# def run_vlm_with_attention(model, processor, image, question: str, device="cuda"):
-#     """
-#     Run VLM inference with attention extraction.
-#     Returns: (text_output, attention_dict)
-#     """
-#     msgs = [{"role": "user", "content": [
-#         {"type": "image", "image": image},
-#         {"type": "text", "text": question}
-#     ]}]
-    
-#     inputs = processor.apply_chat_template(
-#         msgs, 
-#         add_generation_prompt=True, 
-#         tokenize=True, 
-#         return_dict=True, 
-#         return_tensors="pt"
-#     ).to(device)
-    
-#     # Generate with attention
-#     with torch.inference_mode():
-#         outputs = model.generate(
-#             **inputs, 
-#             max_new_tokens=1024,
-#             output_attentions=True,
-#             return_dict_in_generate=True
-#         )
-    
-#     # Extract generated text
-#     generated_ids_trimmed = [
-#         out_ids[len(in_ids):] 
-#         for in_ids, out_ids in zip(inputs.input_ids, outputs.sequences)
-#     ]
-#     output_text = processor.batch_decode(
-#         generated_ids_trimmed, 
-#         skip_special_tokens=True, 
-#         clean_up_tokenization_spaces=False
-#     )[0]
-
-#     decoded_input_tokens = processor.tokenizer.convert_ids_to_tokens(
-#         inputs.input_ids[0].tolist()
-#     )
-
-#     decoded_generated_tokens = processor.tokenizer.convert_ids_to_tokens(
-#         outputs.sequences[0].tolist()
-#     )
-    
-#     # Extract attention weights
-#     attention_data = {
-#         "attentions": outputs.attentions if hasattr(outputs, "attentions") else None,
-#         "input_ids": inputs.input_ids.cpu(),
-#         "generated_ids": outputs.sequences.cpu(),
-#         "decoded_input_tokens": decoded_input_tokens,
-#         "decoded_generated_tokens": decoded_generated_tokens,
-#     }
-    
-#     return output_text, attention_data
 def run_vlm_with_attention(model, processor, image, question: str, device="cuda"):
     """
     Run VLM inference with attention extraction.
@@ -94,29 +38,14 @@ def run_vlm_with_attention(model, processor, image, question: str, device="cuda"
         return_tensors="pt"
     ).to(device)
     
-    # ===== DEBUG: Check input shape =====
-    print(f"DEBUG: Input IDs shape = {inputs.input_ids.shape}")
-    print(f"DEBUG: Pixel values exist: {'pixel_values' in inputs}")
-    if 'pixel_values' in inputs:
-        print(f"DEBUG: Pixel values shape = {inputs.pixel_values.shape}")
-    
     # Generate with attention
     with torch.inference_mode():
         outputs = model.generate(
             **inputs, 
-            max_new_tokens=128,  # ← Reduce from 1024 for testing
+            max_new_tokens=128,
             output_attentions=True,
             return_dict_in_generate=True
         )
-    
-    # ===== DEBUG: Check output structure =====
-    print(f"DEBUG: Output keys = {outputs.keys()}")
-    if hasattr(outputs, 'attentions') and outputs.attentions is not None:
-        print(f"DEBUG: Num generation steps = {len(outputs.attentions)}")
-        if len(outputs.attentions) > 0 and outputs.attentions[0] is not None:
-            print(f"DEBUG: Num layers = {len(outputs.attentions[0])}")
-            if len(outputs.attentions[0]) > 0:
-                print(f"DEBUG: First layer shape = {outputs.attentions[0][0].shape}")
     
     # Extract generated text
     generated_ids_trimmed = [
@@ -144,72 +73,30 @@ def run_vlm_with_attention(model, processor, image, question: str, device="cuda"
         "generated_ids": outputs.sequences.cpu(),
         "decoded_input_tokens": decoded_input_tokens,
         "decoded_generated_tokens": decoded_generated_tokens,
-        "pixel_values_shape": inputs.pixel_values.shape if 'pixel_values' in inputs else None,  # ← ADD THIS
+        "pixel_values_shape": inputs.pixel_values.shape if 'pixel_values' in inputs else None,
     }
+    
     return output_text, attention_data
-    
-    
-def save_attention_maps(attention_data, save_dir, image_name, query_idx, is_masked=False):
-    # def save_attention_maps(attention_data, save_dir, image_name, query_idx, is_masked=False):
-    """Save attention maps as numpy arrays."""
-    if attention_data is None or attention_data['attentions'] is None:
-        print(f"⚠️ No attention data for {image_name} query {query_idx}")
-        return
-    
-    # Create directory
-    suffix = "_masked" if is_masked else ""
-    img_dir = Path(save_dir) / "attention_maps" / f"{image_name.replace('.png', '')}{suffix}"
-    img_dir.mkdir(parents=True, exist_ok=True)
-    
-    attentions = attention_data['attentions']
-    
-    # Check if attentions is valid
-    if not attentions or len(attentions) == 0:
-        print(f"⚠️ Empty attention for {image_name} query {query_idx}")
-        return
-    
-    # Save first few generation steps
-    for step_idx, step_attentions in enumerate(attentions[:5]):
-        # Handle None step
-        if step_attentions is None:
-            continue
-            
-        for layer_idx, layer_attn in enumerate(step_attentions):
-            if layer_attn is not None:
-                np.save(
-                    img_dir / f"q{query_idx}_step{step_idx}_layer{layer_idx}.npy",
-                    layer_attn.cpu().float().numpy()  # ← FIX: Convert BFloat16 to Float32
-                )
-    
-    input_ids = attention_data["input_ids"][0].tolist()
-    generated_ids = attention_data["generated_ids"][0].tolist()
-    decoded_input_tokens = attention_data.get("decoded_input_tokens", [])
-    decoded_generated_tokens = attention_data.get("decoded_generated_tokens", [])
-    
-    # Save metadata
-    metadata = {
-        "num_steps": len(attentions),
-        "num_layers": len(attentions[0]) if attentions and attentions[0] is not None else 0,
-        "input_length": len(input_ids),
-        "output_length": len(generated_ids),
-        "input_ids": input_ids,
-        "generated_ids": generated_ids,
-        "decoded_input_tokens": decoded_input_tokens,
-        "decoded_generated_tokens": decoded_generated_tokens,
-    }
-    with open(img_dir / f"q{query_idx}_metadata.json", 'w') as f:
-        json.dump(metadata, f, indent=2)
 
 
-def save_attention_maps(attention_data, save_dir, image_name, query_idx, is_masked=False):
-    """Save attention maps as numpy arrays - handles autoregressive generation."""
+def save_compact_attention(attention_data, save_dir, image_name, query_idx, is_masked=False):
+    """
+    Save ONLY aggregated attention vector (not all layers/steps).
+    Saves ~50x space: 1-2KB vs 200MB per image.
+    
+    Stores:
+    - mean_pooled: Average across all steps, layers, heads [64]
+    - max_pooled: Max across all steps, layers, heads [64]
+    - last_step_pooled: Last step, averaged across layers/heads [64]
+    - entropy metrics for each aggregation
+    """
     if attention_data is None or attention_data['attentions'] is None:
         print(f"⚠️ No attention data for {image_name} query {query_idx}")
         return
     
     suffix = "_masked" if is_masked else ""
-    img_dir = Path(save_dir) / "attention_maps" / f"{image_name.replace('.png', '')}{suffix}"
-    img_dir.mkdir(parents=True, exist_ok=True)
+    save_path = Path(save_dir) / "attention_compact" / f"{image_name.replace('.png', '')}{suffix}"
+    save_path.mkdir(parents=True, exist_ok=True)
     
     attentions = attention_data['attentions']
     
@@ -217,26 +104,155 @@ def save_attention_maps(attention_data, save_dir, image_name, query_idx, is_mask
         print(f"⚠️ Empty attention for {image_name} query {query_idx}")
         return
     
-    # ===== FIX: Handle autoregressive attention =====
-    # In autoregressive generation, each step has shape [batch, heads, 1, past_seq_len]
-    # We save each step's attention separately
+    # ===== EXTRACT VISION TOKEN RANGE =====
+    decoded_tokens = attention_data['decoded_input_tokens']
+    try:
+        v_start = decoded_tokens.index("<|vision_start|>") + 1
+        v_end = decoded_tokens.index("<|vision_end|>")
+    except ValueError:
+        print(f"⚠️ Vision tokens not found in {image_name} q{query_idx}")
+        return
     
-    for step_idx, step_attentions in enumerate(attentions[:5]):  # Save first 5 steps
+    num_vision_tokens = v_end - v_start
+    if num_vision_tokens != 64:
+        print(f"⚠️ Expected 64 vision tokens, got {num_vision_tokens}")
+    
+    # ===== AGGREGATE ACROSS STEPS, LAYERS, HEADS =====
+    all_vision_attentions = []
+    
+    for step_idx, step_attentions in enumerate(attentions):
         if step_attentions is None:
             continue
             
         for layer_idx, layer_attn in enumerate(step_attentions):
-            if layer_attn is not None:
-                # DEBUG: Print shape for first layer of first step
-                if step_idx == 0 and layer_idx == 0:
-                    print(f"DEBUG: Step {step_idx}, Layer {layer_idx} shape = {layer_attn.shape}")
+            if layer_attn is None:
+                continue
+            
+            # Extract attention to vision tokens
+            # layer_attn shape: [batch, heads, query_tokens, key_tokens]
+            try:
+                if layer_attn.shape[2] == 1:
+                    # Autoregressive: [1, 32, 1, past_seq_len]
+                    att_to_vision = layer_attn[0, :, 0, v_start:v_end].cpu().float().numpy()
+                else:
+                    # Full attention: [1, 32, seq, seq]
+                    att_to_vision = layer_attn[0, :, -1, v_start:v_end].cpu().float().numpy()
                 
+                # Verify shape: should be [32, 64]
+                if att_to_vision.shape != (32, num_vision_tokens):
+                    print(f"⚠️ Unexpected shape {att_to_vision.shape} at step {step_idx}, layer {layer_idx}")
+                    continue
+                
+                all_vision_attentions.append(att_to_vision)  # [32 heads, 64 patches]
+                
+            except Exception as e:
+                print(f"⚠️ Error processing step {step_idx}, layer {layer_idx}: {e}")
+                continue
+    
+    if not all_vision_attentions:
+        print(f"⚠️ No valid attention extracted for {image_name} q{query_idx}")
+        return
+    
+    # Stack: [num_collected, 32, 64]
+    # num_collected = num_steps * num_layers (e.g., 4 steps * 36 layers = 144)
+    stacked = np.stack(all_vision_attentions, axis=0)
+    
+    # ===== COMPUTE AGGREGATIONS =====
+    # 1. Mean pooling: average across all steps, all layers, all heads
+    mean_pooled = stacked.mean(axis=0).mean(axis=0)  # [64]
+    
+    # 2. Max pooling: max across all steps, all layers, all heads
+    max_pooled = stacked.max(axis=0).max(axis=0)  # [64]
+    
+    # 3. Last step pooling: use only the last generation step
+    num_layers = len(attentions[0]) if attentions[0] else 36
+    last_step_start = -num_layers  # Last num_layers entries are from last step
+    last_step_attns = stacked[last_step_start:, :, :]  # [num_layers, 32, 64]
+    last_step_pooled = last_step_attns.mean(axis=0).mean(axis=0)  # [64]
+    
+    # ===== COMPUTE ENTROPY FOR EACH AGGREGATION =====
+    def compute_entropy_vec(att_vec):
+        """Compute Shannon entropy for a single attention vector."""
+        probs = att_vec / (att_vec.sum() + 1e-12)
+        return -(probs * np.log(probs + 1e-12)).sum()
+    
+    entropy_mean = compute_entropy_vec(mean_pooled)
+    entropy_max = compute_entropy_vec(max_pooled)
+    entropy_last = compute_entropy_vec(last_step_pooled)
+    
+    # ===== SAVE COMPACT .npz FILE =====
+    output_file = save_path / f"q{query_idx}_attention.npz"
+    
+    np.savez_compressed(
+        output_file,
+        # Attention vectors (float16 for space efficiency)
+        mean_pooled=mean_pooled.astype(np.float16),           # [64] - 128 bytes
+        max_pooled=max_pooled.astype(np.float16),             # [64] - 128 bytes
+        last_step_pooled=last_step_pooled.astype(np.float16), # [64] - 128 bytes
+        
+        # Entropy metrics (float32 for precision)
+        entropy_mean=np.float32(entropy_mean),
+        entropy_max=np.float32(entropy_max),
+        entropy_last=np.float32(entropy_last),
+        
+        # Metadata
+        num_steps=len(attentions),
+        num_layers=num_layers,
+        num_collected=len(all_vision_attentions),
+        vision_token_range=np.array([v_start, v_end], dtype=np.int16)
+    )
+    
+    # Get file size for logging
+    file_size_kb = output_file.stat().st_size / 1024
+    print(f"✅ Saved compact attention: {output_file.name} ({file_size_kb:.2f} KB)")
+    
+    # ===== SAVE METADATA ONCE PER IMAGE (NOT PER QUERY) =====
+    meta_file = save_path / "metadata.json"
+    if not meta_file.exists():
+        metadata = {
+            "image_filename": image_name,
+            "decoded_input_tokens": attention_data['decoded_input_tokens'],
+            "vision_token_range": [int(v_start), int(v_end)],
+            "pixel_values_shape": str(attention_data.get('pixel_values_shape', 'None')),
+            "note": "Attention stored as mean/max/last_step pooled vectors [64] per query"
+        }
+        with open(meta_file, 'w') as f:
+            json.dump(metadata, f, indent=2)
+
+
+def save_full_attention_maps(attention_data, save_dir, image_name, query_idx, is_masked=False):
+    """
+    OPTIONAL: Save full attention maps (all layers/steps).
+    Only use this for detailed visualization, not for probing experiments.
+    WARNING: This creates ~200MB per image!
+    """
+    if attention_data is None or attention_data['attentions'] is None:
+        print(f"⚠️ No attention data for {image_name} query {query_idx}")
+        return
+    
+    suffix = "_masked" if is_masked else ""
+    img_dir = Path(save_dir) / "attention_maps" / f"{image_name.replace('.png', '')}{suffix}"
+    img_dir.mkdir(parents=True, exist_ok=True)
+    
+    attentions = attention_data['attentions']
+    
+    if not attentions or len(attentions) == 0:
+        print(f"⚠️ Empty attention for {image_name} query {query_idx}")
+        return
+    
+    # Save all steps and layers
+    for step_idx, step_attentions in enumerate(attentions):
+        if step_attentions is None:
+            continue
+            
+        for layer_idx, layer_attn in enumerate(step_attentions):
+            if layer_attn is not None:
                 np.save(
                     img_dir / f"q{query_idx}_step{step_idx}_layer{layer_idx}.npy",
                     layer_attn.cpu().float().numpy()
                 )
     
-    # Save metadata (same as before)
+    # Save metadata
     input_ids = attention_data["input_ids"][0].tolist()
     generated_ids = attention_data["generated_ids"][0].tolist()
     decoded_input_tokens = attention_data.get("decoded_input_tokens", [])
@@ -259,7 +275,8 @@ def save_attention_maps(attention_data, save_dir, image_name, query_idx, is_mask
     with open(img_dir / f"q{query_idx}_metadata.json", 'w') as f:
         json.dump(metadata, f, indent=2)
     
-    print(f"✅ Saved attention for {image_name} query {query_idx}")
+    print(f"✅ Saved full attention maps for {image_name} query {query_idx}")
+
 
 def main():
     ap = argparse.ArgumentParser()
@@ -269,7 +286,9 @@ def main():
     ap.add_argument("--masked_img_subdir", "-m", default="masked/images")
     ap.add_argument("--out_dir", "-o", default="./eval_results")
     ap.add_argument("--save_attention", action="store_true", 
-                    help="Save attention maps (increases memory/time)")
+                    help="Save compact attention vectors (1-2KB per image)")
+    ap.add_argument("--save_full_attention", action="store_true",
+                    help="Save full attention maps (200MB per image) - for visualization only")
     ap.add_argument("--max_samples", type=int, default=None)
     ap.add_argument("--sample_index", type=int, default=None)
 
@@ -283,7 +302,7 @@ def main():
         "Qwen/Qwen3-VL-4B-Instruct",
         dtype="auto",
         device_map="auto",
-        attn_implementation="eager"  # ← FIX: Use eager attention for capturing
+        attn_implementation="eager"  # Required for attention extraction
     )
     processor = AutoProcessor.from_pretrained("Qwen/Qwen3-VL-4B-Instruct")
     device = model.device
@@ -296,7 +315,6 @@ def main():
         data = [data[args.sample_index]]
     elif args.max_samples:
         data = data[:args.max_samples]
-
 
     stats = defaultdict(lambda: {
         "correct": 0, "incorrect": 0, 
@@ -320,17 +338,30 @@ def main():
 
         for q_idx, question in enumerate(item["questions"]):
             # Regular image
-            if args.save_attention:
+            if args.save_attention or args.save_full_attention:
                 reply, attn_data = run_vlm_with_attention(
                     model, processor, image, question["query"], device=str(device)
                 )
-                save_attention_maps(attn_data, args.out_dir, img_name, q_idx, is_masked=False)
                 
-                # Masked image  
+                # Save compact version (recommended for probing)
+                if args.save_attention:
+                    save_compact_attention(attn_data, args.out_dir, img_name, q_idx, is_masked=False)
+                
+                # Save full version (optional, for visualization)
+                if args.save_full_attention:
+                    save_full_attention_maps(attn_data, args.out_dir, img_name, q_idx, is_masked=False)
+                
+                # Masked image
                 reply_masked, attn_data_masked = run_vlm_with_attention(
                     model, processor, image_masked, question["query"], device=str(device)
                 )
-                save_attention_maps(attn_data_masked, args.out_dir, img_name, q_idx, is_masked=True)
+                
+                if args.save_attention:
+                    save_compact_attention(attn_data_masked, args.out_dir, img_name, q_idx, is_masked=True)
+                
+                if args.save_full_attention:
+                    save_full_attention_maps(attn_data_masked, args.out_dir, img_name, q_idx, is_masked=True)
+                    
             else:
                 # Fast mode without attention
                 msgs = [{"role": "user", "content": [
@@ -433,7 +464,9 @@ def main():
     
     print(f"\nResults saved: {csv_path}", flush=True)
     if args.save_attention:
-        print(f"Attention maps: {args.out_dir}/attention_maps/", flush=True)
+        print(f"Compact attention vectors: {args.out_dir}/attention_compact/", flush=True)
+    if args.save_full_attention:
+        print(f"Full attention maps: {args.out_dir}/attention_maps/", flush=True)
 
 
 if __name__ == "__main__":
