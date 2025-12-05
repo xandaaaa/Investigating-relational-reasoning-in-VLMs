@@ -16,20 +16,12 @@ nvidia-smi
 # Activate your Python environment
 source ~/myenv/bin/activate
 
-# Go to your project directory
-cd /work/scratch/arakhmasari/Investigating-relational-reasoning-in-VLMs/
-
-# Optional: check files
-echo "Listing dataset directory..."
-ls synthetic_dataset_generation/dataset_unzipped/output/annotations | head -n 3
-
 # Run the main script
-python main_eval.py \
-  --img_dir /work/scratch/arakhmasari/Investigating-relational-reasoning-in-VLMs/synthetic_dataset_generation/dataset_unzipped/output/images \
-  --ann_dir /work/scratch/arakhmasari/Investigating-relational-reasoning-in-VLMs/synthetic_dataset_generation/dataset_unzipped/output/annotations \
-  --out_dir ./rel_out \
-  --max_samples 20 \
-  --text_only_baseline
+python query_eval.py \
+  --data_dir ./synthetic_dataset_generation/output \
+  --query_file_path ./prompts/queries.json \
+  --out_dir ./eval_results \
+  --save_attention 
 
 echo "==== Job finished ===="
 date
