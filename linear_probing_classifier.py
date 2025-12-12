@@ -123,13 +123,13 @@ def build_semantic_label(q: dict, answer: str) -> str:
 with open(QUERIES_JSON, "r") as f:
     dataset = json.load(f)
 
-# For each query index qi, store features and labels
-X_all = defaultdict(list)  # qi -> list of feature vectors
-y_all = defaultdict(list)  # qi -> list of semantic labels (strings)
+# For each query type, store features and labels
+X_all = defaultdict(list)  # query_type -> list of feature vectors
+y_all = defaultdict(list)  # query_type -> list of semantic labels (strings)
 
 
 # =========================
-# Build X_all and y_all
+# Build X_all and y_all grouped by query_type
 # =========================
 for item in dataset:
     image_id = item["image_id"]
@@ -162,37 +162,33 @@ for item in dataset:
 
         feat = np.concatenate([mean_pooled, max_pooled, last_step_pooled, ent, vtr])
         # feat shape: (64 + 64 + 64 + 3 + 2) = (197,)
-        X_all[qi].append(feat)
+        
+        # Get query type
+        query_type = q["query_type"]
+        X_all[query_type].append(feat)
 
         # Build semantic label
         options = parse_options_from_query(q["query"])
         gt_letter = q["ground_truth"]
         answer_text = options[gt_letter]          # "Yes"/"No"/"3"/spatial phrase/etc.
         semantic_label = build_semantic_label(q, answer_text)
-        y_all[qi].append(semantic_label)
-
-        # check label and ground truth label 
-        # check query type
-        print(f"Processing image_{image_id:05d} q{qi}: query_type='{q['query_type']}'")
-        print(f"image_{image_id:05d} q{qi}: GT letter='{gt_letter}' answer='{answer_text}' semantic_label='{semantic_label}'")
+        y_all[query_type].append(semantic_label)
 
 
 # =========================
-# Linear probing per query index
+# Linear probing per query type
 # =========================
 results = {}
 
 TEST_SIZE = 0.2
 
-for qi, X_list in X_all.items():
+for query_type, X_list in X_all.items():
     X_q = np.stack(X_list, axis=0)          # (N, 197)
-    y_text = np.array(y_all[qi])           # (N,)
+    y_text = np.array(y_all[query_type])   # (N,)
 
-    print(f"\n=== Probing query index {qi} ===")
-        
-    #check labels
-    print("Unique labels before filtering:", np.unique(y_text))
-    print("Samples before filtering:", len(y_text))
+    print(f"\n=== Probing query type: {query_type} ===")
+    print("Samples:", len(y_text))
+    print("First 5 labels:", y_text[:5])
 
     # Encode text labels to integers
     le = LabelEncoder()
@@ -203,7 +199,7 @@ for qi, X_list in X_all.items():
     keep_classes = unique[counts >= 2]
 
     if len(keep_classes) < 2:
-        print(f"Skipping qi={qi}: fewer than 2 classes have at least 2 samples.")
+        print(f"Skipping query_type={query_type}: fewer than 2 classes have at least 2 samples.")
         continue
 
     mask = np.isin(y_enc, keep_classes)
@@ -219,7 +215,7 @@ for qi, X_list in X_all.items():
     test_size_count = int(np.floor(TEST_SIZE * N))
     if test_size_count < n_classes:
         print(
-            f"Skipping qi={qi}: test_size={test_size_count} is smaller than "
+            f"Skipping query_type={query_type}: test_size={test_size_count} is smaller than "
             f"number of classes={n_classes}."
         )
         continue
@@ -240,11 +236,15 @@ for qi, X_list in X_all.items():
 
     y_pred = clf.predict(X_test)
     acc = accuracy_score(y_test, y_pred)
-    results[qi] = acc
+    results[query_type] = acc
 
     kept_labels_readable = [le.inverse_transform([c])[0] for c in keep_classes]
 
-    print(f"Accuracy for query index {qi}: {acc:.4f}")
+    print(f"Accuracy for query type '{query_type}': {acc:.4f}")
     print("Classes used in this probe:", kept_labels_readable)
 
-print("\nFinal accuracies per query index:", results)
+print("\n" + "="*60)
+print("FINAL RESULTS: Accuracies per query type")
+print("="*60)
+for query_type, acc in sorted(results.items()):
+    print(f"{query_type:30s}: {acc:.4f}")
