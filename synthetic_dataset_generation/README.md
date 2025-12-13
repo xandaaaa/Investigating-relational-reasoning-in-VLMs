@@ -1,3 +1,6 @@
+Here's the updated README with `start_index` support for all scripts:
+
+```markdown
 # 2D Synthetic Dataset for Visual Relational Reasoning
 
 A procedural dataset generator for studying relational reasoning in Vision-Language Models (VLMs). This tool creates controlled 2D scenes with geometric shapes and spatial relations, designed for mechanistic interpretability research on attention mechanisms in multimodal AI systems.
@@ -11,6 +14,7 @@ The pipeline now includes a **masking ablation extension** for probing model rob
 ### Key Features
 
 - **Procedural generation**: Fully automated creation of 1000+ images with zero manual annotation
+- **Incremental generation**: Generate datasets in batches with configurable start indices (avoid overwrites)
 - **Controlled complexity**: 2-5 entities per scene with balanced attribute distributions
 - **Dual relation types**: Explicit relations (with arrows) and implicit relations (spatial only)
 - **Masking ablation**: Re-rendered variants masking exactly one object/relation per image (995 valid masked images; skips degenerate scenes)
@@ -157,27 +161,28 @@ output/
 ├── images/                    # Original images
 │   ├── image_00000.png
 │   └── ...
-│   └── image_00999.png
+│   └── image_02999.png       # Supports incremental generation
 ├── annotations/               # Original annotations
 │   ├── annotation_00000.json
 │   └── ...
-│   └── annotation_00999.json
-├── masked/                    # Masked ablation variants (~995 images)
+│   └── annotation_02999.json
+├── masked/                    # Masked ablation variants (~995 per batch)
 │   ├── images/
 │   │   ├── image_00000_masked.png
 │   │   └── ...
 │   ├── annotations/
 │   │   ├── annotation_00000_masked.json  # Includes 'masking_info'
 │   │   └── ...
-│   └── masked_metadata.json    # Masked dataset stats
-└── metadata.json              # Original dataset-level statistics
+│   └── masked_metadata_00000_00999.json  # Per-batch metadata
+├── metadata.json              # Original dataset (indices 0-999)
+└── metadata_01000_02999.json  # Additional batch metadata
 ```
 
 ### Annotation Schema
 
 Each `annotation_XXXXX.json` (original) or `annotation_XXXXX_masked.json` (masked) contains:
 
-```json
+```
 {
   "image_id": 0,
   "image_filename": "image_00000.png",
@@ -188,7 +193,7 @@ Each `annotation_XXXXX.json` (original) or `annotation_XXXXX_masked.json` (maske
       "shape": "circle",
       "size": "large",              // small | medium | large
       "color": "red",               // red | green | blue | yellow | magenta | cyan | purple | orange
-      "center": [112, 112],         // (x, y) pixel coordinates
+      "center": ,         // (x, y) pixel coordinates
       "bbox": {
         "x_min": 60,
         "y_min": 80,
@@ -227,18 +232,20 @@ Each `annotation_XXXXX.json` (original) or `annotation_XXXXX_masked.json` (maske
 
 `metadata.json` (original) and `masked_metadata.json` provide dataset-level information:
 
-```json
+```
 {
   "dataset_name": "2D Synthetic Relational Reasoning Dataset",
   "num_images": 1000,
+  "start_index": 0,              // Added in v1.3
+  "end_index": 999,              // Added in v1.3
   "splits": {
     "train": [0, 1, 2, ..., 799],    // 80%
     "val": [800, 801, ..., 899],      // 10%
     "test": [900, 901, ..., 999]      // 10%
   },
   "config": {
-    "image_size": [224, 224],
-    "background_color": [255, 255, 255],
+    "image_size": ,
+    "background_color": ,
     "train_split": 0.8,
     "val_split": 0.1,
     "test_split": 0.1,
@@ -274,20 +281,66 @@ pip install transformers torch huggingface-hub
 
 ### 1. Dataset Generation
 
-Generate 1000 original images:
-
+#### Generate Initial 1000 Images (0-999)
 ```
 python generate_dataset.py
 ```
 
+#### Generate Additional 1000 Images (1000-2999)
+```
+python generate_dataset.py --start_index 1000 --num_images 1000
+```
+
+#### Generate Custom Range
+```
+# Generate 500 images starting from index 2000
+python generate_dataset.py --start_index 2000 --num_images 500
+
+# Use custom output directory
+python generate_dataset.py --start_index 0 --num_images 100 --output_dir ./test_output
+```
+
+**Parameters**:
+- `--start_index`: Starting index for image generation (default: 0)
+- `--num_images`: Number of images to generate (default: from DATASET_CONFIG)
+- `--output_dir`: Output directory (default: 'output')
+
+**Features**:
+- **No overwrites**: New images get unique indices (e.g., `image_01000.png`, `image_01001.png`)
+- **Separate metadata**: Each batch creates `metadata_<start>_<end>.json`
+- **Backward compatible**: Works exactly like before if no arguments provided
+
 ### 2. Masking Ablation
 
-After generation, create masked variants:
+#### Mask Initial Batch (0-999)
+```
+python create_masked_dataset.py
+```
 
+#### Mask Additional Batch (1000-2999)
 ```
-python create_masked_dataset.py  # All 1000 (processes ~995)
-# Or: python create_masked_dataset.py --num_images 500 --seed 42
+python create_masked_dataset.py --start_index 1000 --num_images 1000
 ```
+
+#### Custom Masking Options
+```
+# Custom range with different seed
+python create_masked_dataset.py --start_index 2000 --num_images 500 --seed 123
+
+# Custom base directory
+python create_masked_dataset.py --start_index 1000 --num_images 1000 --base_dir ./custom_output
+```
+
+**Parameters**:
+- `--num_images`: Number of images to mask (default: 1000)
+- `--start_index`: Starting index for masking (default: 0)
+- `--seed`: Random seed (default: 42)
+- `--base_dir`: Base directory (default: 'output')
+
+**Output**:
+- Masked images: `output/masked/images/image_<index>_masked.png`
+- Masked annotations: `output/masked/annotations/annotation_<index>_masked.json`
+- Batch metadata: `output/masked/masked_metadata_<start>_<end>.json`
 
 ### 3. Ground-Truth Annotation Loading
 
@@ -296,10 +349,13 @@ Use `get_annotations.py` (AnnotationLoader class) to load GT for images:
 ```
 # Python usage
 from get_annotations import AnnotationLoader
+
 loader = AnnotationLoader(base_dir="output")
 gt = loader.get_gt("image_00001.png", masked=True, fallback_to_original=True)
 print(json.dumps(gt, indent=2))  # Full JSON with entities/relations/masking_info
+```
 
+```
 # CLI
 python get_annotations.py image_00001.png --masked --fallback
 ```
@@ -315,6 +371,7 @@ python get_annotations.py image_00001.png --masked --fallback
 Use `test_single_image.py` for single-image testing (Qwen-VL by default) or your batch script (`evaluate_relations.py`) for full datasets. Prompts are dynamically generated from GT relations (one per relation, e.g., 3-6 prompts/image) using templates like "Is the {color} {shape} above the {color} {shape}?" (GT="yes").
 
 #### Single-Image Testing (`test_single_image.py`)
+
 Quickly probe a specific image (masked/unmasked) with all GT-derived prompts:
 
 ```
@@ -348,24 +405,25 @@ python test_single_image.py --image_filename image_00001.png --both --out_dir ./
   ================================================== Testing UNMASKED ==================================================
   ✅ Loaded GT: 3 entities, 3 relations
   Image: output/images/image_00001.png
-
   Prompt (left_of): Is the red triangle to the left of the blue square?
   Raw: Yes, the red triangle is positioned to the left of the blue square.
   Parsed: yes | GT: yes | Correct: ✓
-
+  
   --- UNMASKED Summary ---
   Prompts: 3 | Accuracy: 1.000
     above: 1.000
     below: 1.000
     left_of: 1.000
-
+  
   Saved CSV: ./rel_out_single/results_image_00001_both.csv
   Saved JSON: ./rel_out_single/results_image_00001_both.json
   ```
   - For masked: Adds "⚠️ MASKED RELATION (explicit=true: no arrow visible)" if prompt queries masked item.
+
 - **Files** (in `--out_dir`):
   - `results_<filename>_<mode>.csv`: Per-prompt rows (mode, img, question, gt, pred, relation, raw, is_masked, explicit). E.g., columns for easy Excel analysis.
   - `results_<filename>_<mode>.json`: Full results list + summary dict (acc, per_relation).
+
 - **GT Usage**: Prompts derive from GT relations (e.g., left_of → "Is A left of B?"); GT="yes" always. Masked GT flags ablations. Accuracy: Pred yes/no vs. GT (using your `parse_yesno`).
 
 **Batch Evaluation** (`evaluate_relations.py` – your original script):
@@ -373,6 +431,70 @@ python test_single_image.py --image_filename image_00001.png --both --out_dir ./
 python evaluate_relations.py --img_dir output/images --ann_dir output/annotations --max_samples 100 --out_dir ./batch_results
 ```
 - Processes all/up to N annotations; generates GT prompts; saves CSV with metrics. Add `--masked` flag if extending for masked dir.
+
+### 5. Question Generation (Appending Queries)
+
+Generate VQA-style questions from annotations and append to existing `queries.json`:
+
+```
+# Generate queries for initial batch (0-999)
+python generate_queries.py
+
+# Append queries for additional batch (1000-2999)
+python generate_queries.py --start_index 1000 --num_images 1000
+
+# Custom options
+python generate_queries.py \
+  --start_index 2000 \
+  --num_images 500 \
+  --annotations_folder ./custom_output/annotations \
+  --annotations_masked_folder ./custom_output/masked/annotations \
+  --output_json ./my_queries.json \
+  --no_append  # Overwrite instead of appending
+```
+
+**Parameters**:
+- `--start_index`: First image index to process (default: 0)
+- `--num_images`: Number of images to process from start_index (default: None = all from start_index)
+- `--annotations_folder`: Path to annotations (default: 'synthetic_dataset_generation/output/annotations')
+- `--annotations_masked_folder`: Path to masked annotations (default: 'synthetic_dataset_generation/output/masked/annotations')
+- `--output_json`: Output queries file (default: 'queries.json')
+- `--no_append`: Overwrite output file instead of appending (default: append mode)
+
+**Output Format** (`queries.json`):
+```
+[
+  {
+    "image_id": 1000,
+    "image_filename": "image_01000.png",
+    "questions": [
+      {
+        "query_type": "count",
+        "query": "How many shapes are in this image? ...",
+        "ground_truth": "a)",
+        "ground_truth_masked": "b)"
+      },
+      {
+        "query_type": "recognition_shape",
+        "query": "Does this image have a circle shape? ...",
+        "ground_truth": "a)",
+        "ground_truth_masked": "None"
+      }
+      // ... more questions
+    ]
+  }
+  // ... more images
+]
+```
+
+**Query Types Generated**:
+- `count`: Number of shapes (1 per image)
+- `recognition_shape`: Shape presence (2 per image: 1 true, 1 false)
+- `recognition_color`: Color presence (2 per image: 1 true, 1 false)
+- `recognition_shape_and_color`: Combined attribute (2 per image: 1 true, 1 false)
+- `implicit_spatial`: Position relations without arrows (1 per image)
+- `explicit_connection`: Which objects are connected (1 per image)
+- `explicit_arrow_direction`: Arrow direction queries (1 per image)
 
 ## Code Architecture
 
@@ -385,11 +507,12 @@ synthetic_dataset_generation/
 ├── scene_generator.py       # Core scene generation logic
 ├── relation_annotator.py    # Relation detection and arrow rendering
 ├── utils.py                 # Helper functions (collision detection, etc.)
-├── generate_dataset.py      # Main execution script
-├── create_masked_dataset.py # Masking ablation (re-rendering)
+├── generate_dataset.py      # Main execution script (with --start_index)
+├── create_masked_dataset.py # Masking ablation (with --start_index)
+├── generate_queries.py      # VQA question generation (with --start_index)
 ├── get_annotations.py       # AnnotationLoader class for GT loading
-├── test_single_image.py     # New: Single-image VLM testing (Qwen-VL, GT prompts)
-├── evaluate_relations.py    # Your batch VLM evaluator (optional extension)
+├── test_single_image.py     # Single-image VLM testing (Qwen-VL, GT prompts)
+├── evaluate_relations.py    # Batch VLM evaluator (optional extension)
 └── requirements.txt         # Dependencies
 ```
 
@@ -410,6 +533,11 @@ synthetic_dataset_generation/
 - Extracts scene_id from filename
 - Optional fallback for skipped masked images
 
+**QuestionGenerator** (`generate_queries.py`):
+- Generates multiple question types from annotations
+- Handles both original and masked ground truth
+- Supports incremental question generation
+
 ## Use Cases
 
 ### 1. VLM Attention Analysis
@@ -429,6 +557,7 @@ img = Image.open('output/masked/images/image_00001_masked.png')
 # Check masking/GT
 if 'masking_info' in gt:
     print(f"Masked: {gt['masking_info']}")
+
 for rel in gt['relations']:
     print(f"GT Relation: {rel['subject_id']} {rel['relation']} {rel['object_id']} (explicit: {rel.get('explicit', False)})")
 
@@ -473,6 +602,26 @@ python test_single_image.py --image_filename image_00001.png --both
 python evaluate_relations.py --img_dir output/masked/images --ann_dir output/masked/annotations --max_samples 100
 ```
 
+### 4. Incremental Dataset Expansion
+
+Generate large datasets in manageable batches:
+
+```
+# Initial dataset (0-999)
+python generate_dataset.py
+
+# Expand to 2000 images (1000-2999)
+python generate_dataset.py --start_index 1000 --num_images 1000
+
+# Create masked versions for both batches
+python create_masked_dataset.py
+python create_masked_dataset.py --start_index 1000 --num_images 1000
+
+# Generate questions for all images
+python generate_queries.py  # 0-999
+python generate_queries.py --start_index 1000 --num_images 1000  # Appends 1000-2999
+```
+
 ## Dataset Statistics
 
 **Per-image Statistics** (average over 1000 original images):
@@ -481,7 +630,7 @@ python evaluate_relations.py --img_dir output/masked/images --ann_dir output/mas
 - Explicit relations: 3.0 ± 1.9 (48-52% with random variation)
 - Implicit relations: 3.1 ± 1.9
 
-**Masked Statistics** (~995 images):
+**Masked Statistics** (~995 images per batch):
 - Valid scenes: 995 (skips 5 with <2 entities)
 - Object masks: ~50% (avg 1 entity + 1-2 relations removed)
 - Relation masks: ~50% (1 flagged; explicit → no arrow)
@@ -578,6 +727,7 @@ Key adaptations:
 - Masking ablation for robustness probing
 - Optimized for VLM attention analysis
 - Reduced entity count for focused interpretability
+- Incremental generation support for scalable datasets
 
 ## Contact
 
@@ -587,6 +737,13 @@ For questions, issues, or contributions:
 - Institution: ETH Zurich, Deep Learning Course, Autumn 2025
 
 ## Version History
+
+**v1.3** (December 2025)
+- Added `--start_index` parameter to all generation scripts
+- Support for incremental dataset expansion without overwrites
+- Batch-specific metadata files (e.g., `metadata_01000_02999.json`)
+- Question generation script with append mode
+- Enhanced documentation for scalable workflows
 
 **v1.2** (November 2025)
 - Added VLM evaluation scripts (single-image tester with GT prompts)
@@ -606,4 +763,13 @@ For questions, issues, or contributions:
 - 4 shape types, 8 colors, 3 sizes
 - Explicit/implicit relation support
 - Complete JSON annotations
+```
 
+**Key Changes in v1.3**:
+1. Added `--start_index` documentation for all three scripts (`generate_dataset.py`, `create_masked_dataset.py`, `generate_queries.py`)
+2. New "Incremental Dataset Expansion" use case showing batch workflows
+3. Updated directory structure to show indices beyond 999
+4. Added batch metadata file naming convention
+5. New section on Question Generation with append mode
+6. Updated version history with v1.3 features
+7. Enhanced examples showing 1000-2999 generation across all pipelines

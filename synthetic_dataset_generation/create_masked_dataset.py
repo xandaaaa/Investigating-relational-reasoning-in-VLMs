@@ -3,6 +3,7 @@ create_masked_dataset.py: Fixed for string-based GT (map 'size'/'color' str → 
 - Uses SHAPE_CONFIG['sizes'] for "large" → 40, etc.
 - COLOR_STR_TO_RGB from utils.get_color_name inverse.
 - Now handles your annotation format exactly.
+- Added --start_index support to avoid overwriting existing masked data.
 """
 import json
 import random
@@ -10,10 +11,12 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 from tqdm import tqdm
 
+
 # Imports from your codebase
 from shapes import SHAPE_DRAWERS, draw_arrow  # Drawing
 from config import RELATION_CONFIG, SHAPE_CONFIG  # arrow config + sizes
 from get_groundtruth_annotations import AnnotationLoader  # Load GT
+
 
 # RGB map from color str (inverse of utils.get_color_name)
 COLOR_STR_TO_RGB = {
@@ -26,6 +29,7 @@ COLOR_STR_TO_RGB = {
     'purple': (128, 0, 128),
     'orange': (255, 128, 0),
 }
+
 
 def re_render_masked_scene(original_gt: dict, mask_type: str, masked_item: dict, output_img_path: str, output_ann_path: str):
     """Re-render: Map GT strings to numeric/RGB; use SHAPE_DRAWERS/draw_arrow."""
@@ -102,8 +106,9 @@ def re_render_masked_scene(original_gt: dict, mask_type: str, masked_item: dict,
     print(f"✅ Re-rendered {Path(output_img_path).name}: {len(masked_entities)} entities "
           f"(mapped str → size/RGB; bboxes updated)")
 
-def main(num_images=1000, seed=42, base_dir='output'):
-    """Main loop: Mask random scenes."""
+
+def main(num_images=1000, seed=42, base_dir='output', start_index=0):
+    """Main loop: Mask random scenes starting from start_index."""
     random.seed(seed)
     loader = AnnotationLoader(base_dir=base_dir)
     masked_img_dir = Path(base_dir) / 'masked' / 'images'
@@ -111,9 +116,13 @@ def main(num_images=1000, seed=42, base_dir='output'):
     masked_img_dir.mkdir(parents=True, exist_ok=True)
     masked_ann_dir.mkdir(parents=True, exist_ok=True)
     
+    end_index = start_index + num_images
+    
+    print(f"🎭 Creating masked dataset from indices {start_index} to {end_index-1}...")
+    
     processed = 0
     skipped = 0
-    for scene_id in tqdm(range(num_images), desc="Masking scenes"):
+    for scene_id in tqdm(range(start_index, end_index), desc="Masking scenes"):
         image_filename = f"image_{scene_id:05d}.png"
         gt = loader.get_gt(image_filename, masked=False)
         if not gt or len(gt['entities']) < 2:
@@ -143,23 +152,35 @@ def main(num_images=1000, seed=42, base_dir='output'):
         re_render_masked_scene(gt, mask_type, masked_item, str(out_img), str(out_ann))
         processed += 1
     
-    # Masked metadata
+    # Masked metadata (with batch info)
     masked_metadata = {
         'num_masked_images': processed,
+        'start_index': start_index,
+        'end_index': end_index - 1,
         'skipped': skipped,
         'mask_types': {'object': processed // 2, 'relation': processed - processed // 2}
     }
-    with open(Path(base_dir) / 'masked' / 'masked_metadata.json', 'w') as f:
+    
+    # Save metadata with batch identifier
+    metadata_file = Path(base_dir) / 'masked' / f'masked_metadata_{start_index:05d}_{end_index-1:05d}.json'
+    with open(metadata_file, 'w') as f:
         json.dump(masked_metadata, f, indent=2)
     
     print(f"✅ Complete: {processed}/{num_images} masked images (skipped {skipped}). "
           f"Fixed str mapping for size/color – visuals now match originals!")
+    print(f"📁 Metadata saved: {metadata_file}")
+
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Create masked dataset (fixed for str GT)")
-    parser.add_argument("--num_images", type=int, default=1000)
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--base_dir", default="output")
+    parser.add_argument("--num_images", type=int, default=1000,
+                        help="Number of images to mask (default: 1000)")
+    parser.add_argument("--start_index", type=int, default=0,
+                        help="Starting index for masking (default: 0)")
+    parser.add_argument("--seed", type=int, default=42,
+                        help="Random seed (default: 42)")
+    parser.add_argument("--base_dir", default="output",
+                        help="Base directory (default: output)")
     args = parser.parse_args()
-    main(args.num_images, args.seed, args.base_dir)
+    main(args.num_images, args.seed, args.base_dir, args.start_index)
