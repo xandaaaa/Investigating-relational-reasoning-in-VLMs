@@ -13,7 +13,7 @@ from sklearn.metrics import accuracy_score
 # =========================
 # Paths
 # =========================
-ROOT = Path("eval_results/attention_compact")
+ROOT = Path("eval_results/attention_per_layer")
 QUERIES_JSON = Path("prompts/queries.json")
 
 # =========================
@@ -267,23 +267,23 @@ for item in dataset:
     questions = item["questions"]
 
     for qi, q in enumerate(questions):
-        npz_path = img_folder / f"q{qi}_attention.npz"
+        npz_path = img_folder / f"q{qi}_attention_per_layer.npz"
         if not npz_path.exists():
             continue
 
         npz = np.load(npz_path)
+        num_layers = int(npz.get("num_layers", 0))
 
-        mean_pooled = npz["mean_pooled"].astype(np.float32)
-        max_pooled = npz["max_pooled"].astype(np.float32)
-        last_step_pooled = npz["last_step_pooled"].astype(np.float32)
+        layer_features = []
+        for i in range(num_layers):
+            key = f"layer_{i}_mean_pooled_heads"
+            if key in npz:
+                layer_features.append(npz[key].astype(np.float32).flatten())
 
-        ent = np.array(
-            [npz["entropy_mean"], npz["entropy_max"], npz["entropy_last"]],
-            dtype=np.float32
-        )
-        vtr = npz["vision_token_range"].astype(np.float32)
-
-        feat = np.concatenate([mean_pooled, max_pooled, last_step_pooled, ent, vtr])
+        if layer_features:
+            feat = np.concatenate(layer_features)
+        else:
+            continue
         
         query_type = q["query_type"]
         
@@ -352,7 +352,7 @@ for query_type, X_list in X_simple.items():
     X_train = scaler.fit_transform(X_train)
     X_test = scaler.transform(X_test)
 
-    clf = LogisticRegression(max_iter=1000)
+    clf = LogisticRegression(C=0.001, max_iter=1000)
     clf.fit(X_train, y_train)
 
     y_pred = clf.predict(X_test)
@@ -409,7 +409,7 @@ for query_type, X_list in X_complex.items():
         X_train = scaler.fit_transform(X_train)
         X_test = scaler.transform(X_test)
         
-        clf = LogisticRegression(max_iter=1000)
+        clf = LogisticRegression(C=0.001, max_iter=1000)
         clf.fit(X_train, y_train)
         
         y_pred = clf.predict(X_test)

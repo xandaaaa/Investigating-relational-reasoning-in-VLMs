@@ -272,14 +272,14 @@ def extract_layer_features(npz, layer_idx):
     
     # Concatenate all features
     feat = np.concatenate([
-        mean_pooled,
-        max_pooled,
-        mean_across_steps,
-        last_step,
-        entropy_mean_heads,
-        entropy_max_heads,
-        entropy_mean_steps,
-        entropy_last
+        mean_pooled
+        # max_pooled,
+        # mean_across_steps,
+        # last_step,
+        # entropy_mean_heads,
+        # entropy_max_heads,
+        # entropy_mean_steps,
+        # entropy_last
     ])
     
     return feat
