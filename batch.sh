@@ -17,7 +17,7 @@ nvidia-smi
 source ~/myenv/bin/activate
 
 # Run the main script
-python query_eval.py \
+python linear_probing_classifier_per_layer.py \
   --data_dir ./synthetic_dataset_generation/output \
   --query_file_path ./prompts/queries.json \
   --out_dir ./eval_results \

@@ -1,0 +1,2 @@
+query_type,label_name,n_classes,n_samples,n_test,n_right,n_false,acc_all,acc_right,acc_false
+count,,4,2726,546,525,21,0.9358974358974359,0.9542857142857143,0.47619047619047616
