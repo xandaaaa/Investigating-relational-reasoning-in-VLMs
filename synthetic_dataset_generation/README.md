@@ -1,5 +1,3 @@
-Here's the updated README with `start_index` support for all scripts:
-
 ```markdown
 # 2D Synthetic Dataset for Visual Relational Reasoning
 

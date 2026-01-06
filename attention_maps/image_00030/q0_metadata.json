@@ -1,6 +1,0 @@
-{
-  "num_steps": 5,
-  "num_layers": 36,
-  "input_length": 128,
-  "output_length": 133
-}

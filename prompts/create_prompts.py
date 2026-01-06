@@ -561,41 +561,9 @@ def compile_json(annotations_folder: str, annotations_masked_folder: str, output
     for qt, count in sorted(query_types.items()):
         print(f"  {qt}: {count}")
 
-
-def example_print_questions():
-    """prints all queries for a json file (json_file_path) from the synthetic dataset"""
-
-    # Example JSON data
-    json_file_path = 'synthetic_dataset_generation/output/annotations/annotation_00001.json'
-    masked_json_file_path = 'synthetic_dataset_generation/output/masked/annotations/annotation_00001_masked.json'
-
-    # Load JSON
-    def load_json(path):
-        with open(path, 'r') as f:
-            return json.load(f)
-    
-    # Generate questions
-    json_data = load_json(json_file_path)
-    masked_json_data = load_json(masked_json_file_path) if Path(masked_json_file_path).exists() else None
-    generator = QuestionGenerator(json_data, masked_json_data)
-    questions = generator.generate_all_questions()
-    
-    # Print results
-    for i, q in enumerate(questions, 1):
-        print(f"\n{'='*80}")
-        print(f"Question {i}:")
-        print(f"Type: {q['query_type']}")
-        print(f"Q: {q['query']}")
-        print(f"A (Original): {q['answer']}")
-        print(f"A (Masked): {q['answer_masked']}")
-
-
 if __name__ == "__main__":
 
     annotations_folder = 'synthetic_dataset_generation/output/annotations'
     annotations_masked_folder = 'synthetic_dataset_generation/output/masked/annotations'
     output_json = 'queries.json'
     compile_json(annotations_folder, annotations_masked_folder, output_json)
-
-    #EXAMPLE SHOW CREATED QUERIES FOR ONE IMAGE
-    # example_print_questions()
