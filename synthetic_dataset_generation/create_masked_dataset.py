@@ -71,7 +71,7 @@ def re_render_masked_scene(original_gt: dict, mask_type: str, masked_item: dict,
             }
             print(f"  Drew {shape} {size_str} {color_str}: size={numeric_size}, bbox={entity['bbox']}")
         else:
-            print(f"⚠️ Unknown shape '{shape}' for ID {entity['id']}; skipped")
+            print(f" Unknown shape '{shape}' for ID {entity['id']}; skipped")
     
     # Re-draw non-masked explicit arrows
     for rel in masked_relations:
@@ -103,7 +103,7 @@ def re_render_masked_scene(original_gt: dict, mask_type: str, masked_item: dict,
     with open(output_ann_path, 'w') as f:
         json.dump(original_gt, f, indent=2)
     
-    print(f"✅ Re-rendered {Path(output_img_path).name}: {len(masked_entities)} entities "
+    print(f" Re-rendered {Path(output_img_path).name}: {len(masked_entities)} entities "
           f"(mapped str → size/RGB; bboxes updated)")
 
 
@@ -166,7 +166,7 @@ def main(num_images=1000, seed=42, base_dir='output', start_index=0):
     with open(metadata_file, 'w') as f:
         json.dump(masked_metadata, f, indent=2)
     
-    print(f"✅ Complete: {processed}/{num_images} masked images (skipped {skipped}). "
+    print(f" Complete: {processed}/{num_images} masked images (skipped {skipped}). "
           f"Fixed str mapping for size/color – visuals now match originals!")
     print(f"📁 Metadata saved: {metadata_file}")
 

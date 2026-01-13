@@ -70,7 +70,7 @@ class AnnotationLoader:
         
         # Check if in valid range for fallback (IDs 0-999)
         if fallback_to_original and scene_id >= 1000:
-            print(f"⚠️ Scene ID {scene_id} >= 1000: No fallback available.")
+            print(f" Scene ID {scene_id} >= 1000: No fallback available.")
             fallback_to_original = False
         
         ann_filename = f"annotation_{scene_id:05d}"
@@ -94,20 +94,20 @@ class AnnotationLoader:
             if original_path.exists():
                 with open(original_path, "r") as f:
                     gt = json.load(f)
-                print(f"🔄 Fallback: Loaded original GT for skipped masked scene_id={scene_id} (masked file missing)")
+                print(f" Fallback: Loaded original GT for skipped masked scene_id={scene_id} (masked file missing)")
             else:
-                print(f"⚠️ Fallback failed: Original file also missing for scene_id={scene_id}")
+                print(f" Fallback failed: Original file also missing for scene_id={scene_id}")
         else:
-            print(f"⚠️ Annotation file not found: {ann_path}. Returning None. (Skipped in masking if masked=True)")
+            print(f" Annotation file not found: {ann_path}. Returning None. (Skipped in masking if masked=True)")
         
         if gt is not None:
-            print(f"✅ Loaded GT for image '{image_filename}' (scene_id={scene_id}, masked={masked}, fallback={fallback_to_original}): "
+            print(f" Loaded GT for image '{image_filename}' (scene_id={scene_id}, masked={masked}, fallback={fallback_to_original}): "
                   f"{len(gt.get('entities', []))} entities, {len(gt.get('relations', []))} relations")
             # If fallback, note no masking_info
             if masked and fallback_to_original and 'masking_info' not in gt:
                 print(f"   - Note: Using original GT (no 'masking_info' due to fallback)")
         else:
-            print(f"❌ No GT available for '{image_filename}' (scene_id={scene_id})")
+            print(f" No GT available for '{image_filename}' (scene_id={scene_id})")
         
         return gt
 

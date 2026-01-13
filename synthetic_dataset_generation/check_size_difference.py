@@ -16,7 +16,7 @@ def compare_sizes(base_dir: str, image_filename: str):
     masked_gt = loader.get_gt(image_filename, masked=True, fallback_to_original=False)  # No fallback to see raw
     
     if not orig_gt or not masked_gt:
-        print(f"❌ Missing GT for {image_filename}. Run generation/masking?")
+        print(f" Missing GT for {image_filename}. Run generation/masking?")
         return
     
     print(f"Original GT: {len(orig_gt['entities'])} entities")
@@ -43,11 +43,11 @@ def compare_sizes(base_dir: str, image_filename: str):
             mismatches.append(f"ID {sid}: Orig {orig_size} != Masked {mask_size}")
     
     if mismatches:
-        print(f"\n🚨 SIZE MISMATCHES ({len(mismatches)}):")
+        print(f"\n SIZE MISMATCHES ({len(mismatches)}):")
         for m in mismatches:
             print(f"  {m}")
     else:
-        print("\n✅ Sizes consistent for shared entities!")
+        print("\n Sizes consistent for shared entities!")
     
     # Optional: Visual diff (open images side-by-side)
     from PIL import Image

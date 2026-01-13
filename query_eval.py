@@ -1,13 +1,9 @@
 """
 query_eval.py - VLM Evaluation with Per-Layer Attention Storage
 """
-print("Importing transformers...", flush=True)
+
 from transformers import Qwen3VLForConditionalGeneration, AutoProcessor
-
-print("Importing torch...", flush=True)
 import torch
-
-print("Importing huggingface_hub...", flush=True)
 from huggingface_hub import login
 
 import os, json, re, csv, argparse, random
@@ -94,7 +90,7 @@ def save_compact_attention(attention_data, save_dir, image_name, query_idx, is_m
     File size: ~10-20KB per image (vs 200MB full, vs 1-2KB global pooling)
     """
     if attention_data is None or attention_data['attentions'] is None:
-        print(f"⚠️ No attention data for {image_name} query {query_idx}")
+        print(f" No attention data for {image_name} query {query_idx}")
         return
 
     suffix = "_masked" if is_masked else ""
@@ -104,7 +100,7 @@ def save_compact_attention(attention_data, save_dir, image_name, query_idx, is_m
     attentions = attention_data['attentions']
 
     if not attentions or len(attentions) == 0:
-        print(f"⚠️ Empty attention for {image_name} query {query_idx}")
+        print(f" Empty attention for {image_name} query {query_idx}")
         return
 
     # ===== EXTRACT VISION TOKEN RANGE =====
@@ -113,12 +109,12 @@ def save_compact_attention(attention_data, save_dir, image_name, query_idx, is_m
         v_start = decoded_tokens.index("<|vision_start|>") + 1
         v_end = decoded_tokens.index("<|vision_end|>")
     except ValueError:
-        print(f"⚠️ Vision tokens not found in {image_name} q{query_idx}")
+        print(f" Vision tokens not found in {image_name} q{query_idx}")
         return
 
     num_vision_tokens = v_end - v_start
     if num_vision_tokens != 64:
-        print(f"⚠️ Expected 64 vision tokens, got {num_vision_tokens}")
+        print(f" Expected 64 vision tokens, got {num_vision_tokens}")
 
     # ===== ORGANIZE ATTENTION BY LAYER =====
     # Structure: layers_data[layer_idx] = list of [32, 64] arrays (one per step)
@@ -145,13 +141,13 @@ def save_compact_attention(attention_data, save_dir, image_name, query_idx, is_m
 
                 # Verify shape: should be [32, 64]
                 if att_to_vision.shape != (32, num_vision_tokens):
-                    print(f"⚠️ Unexpected shape {att_to_vision.shape} at step {step_idx}, layer {layer_idx}")
+                    print(f" Unexpected shape {att_to_vision.shape} at step {step_idx}, layer {layer_idx}")
                     continue
 
                 layers_data[layer_idx].append(att_to_vision)  # [32 heads, 64 patches]
 
             except Exception as e:
-                print(f"⚠️ Error processing step {step_idx}, layer {layer_idx}: {e}")
+                print(f" Error processing step {step_idx}, layer {layer_idx}: {e}")
                 continue
 
     # ===== COMPUTE PER-LAYER AGGREGATIONS =====
@@ -164,7 +160,7 @@ def save_compact_attention(attention_data, save_dir, image_name, query_idx, is_m
 
     for layer_idx in range(num_layers):
         if not layers_data[layer_idx]:
-            print(f"⚠️ No data for layer {layer_idx}")
+            print(f" No data for layer {layer_idx}")
             continue
 
         # Stack all steps for this layer: [num_steps, 32, 64]
@@ -201,7 +197,7 @@ def save_compact_attention(attention_data, save_dir, image_name, query_idx, is_m
         }
 
     if not per_layer_data:
-        print(f"⚠️ No valid layers for {image_name} q{query_idx}")
+        print(f" No valid layers for {image_name} q{query_idx}")
         return
 
     # ===== SAVE PER-LAYER .npz FILE =====
@@ -222,7 +218,7 @@ def save_compact_attention(attention_data, save_dir, image_name, query_idx, is_m
 
     # Get file size for logging
     file_size_kb = output_file.stat().st_size / 1024
-    print(f"✅ Saved per-layer attention: {output_file.name} ({file_size_kb:.2f} KB, {num_layers} layers)")
+    print(f" Saved per-layer attention: {output_file.name} ({file_size_kb:.2f} KB, {num_layers} layers)")
 
     # ===== SAVE METADATA ONCE PER IMAGE (NOT PER QUERY) =====
     meta_file = save_path / "metadata.json"
@@ -252,7 +248,7 @@ def save_full_attention_maps(attention_data, save_dir, image_name, query_idx, is
     WARNING: This creates ~200MB per image!
     """
     if attention_data is None or attention_data['attentions'] is None:
-        print(f"⚠️ No attention data for {image_name} query {query_idx}")
+        print(f" No attention data for {image_name} query {query_idx}")
         return
 
     suffix = "_masked" if is_masked else ""
@@ -262,7 +258,7 @@ def save_full_attention_maps(attention_data, save_dir, image_name, query_idx, is
     attentions = attention_data['attentions']
 
     if not attentions or len(attentions) == 0:
-        print(f"⚠️ Empty attention for {image_name} query {query_idx}")
+        print(f" Empty attention for {image_name} query {query_idx}")
         return
 
     # Save all steps and layers
@@ -300,7 +296,7 @@ def save_full_attention_maps(attention_data, save_dir, image_name, query_idx, is
     with open(img_dir / f"q{query_idx}_metadata.json", 'w') as f:
         json.dump(metadata, f, indent=2)
 
-    print(f"✅ Saved full attention maps for {image_name} query {query_idx}")
+    print(f" Saved full attention maps for {image_name} query {query_idx}")
 
 
 def main():
@@ -319,7 +315,7 @@ def main():
 
     args = ap.parse_args()
 
-    login(token="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")
+    login(token="YOUR_HUGGINGFACE_TOKEN")
     print("Successfully logged into HF!", flush=True)
 
     print("Loading Qwen3-VL-4B-Instruct...", flush=True)

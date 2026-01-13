@@ -400,8 +400,8 @@ python test_single_image.py --image_filename image_00001.png --both --out_dir ./
 **Expected Outputs**:
 - **Console**:
   ```
-  ================================================== Testing UNMASKED ==================================================
-  ✅ Loaded GT: 3 entities, 3 relations
+  ================================================== Testing UNMASKED ==================================================  
+  Loaded GT: 3 entities, 3 relations
   Image: output/images/image_00001.png
   Prompt (left_of): Is the red triangle to the left of the blue square?
   Raw: Yes, the red triangle is positioned to the left of the blue square.
@@ -416,7 +416,7 @@ python test_single_image.py --image_filename image_00001.png --both --out_dir ./
   Saved CSV: ./rel_out_single/results_image_00001_both.csv
   Saved JSON: ./rel_out_single/results_image_00001_both.json
   ```
-  - For masked: Adds "⚠️ MASKED RELATION (explicit=true: no arrow visible)" if prompt queries masked item.
+  - For masked: Adds " MASKED RELATION (explicit=true: no arrow visible)" if prompt queries masked item.
 
 - **Files** (in `--out_dir`):
   - `results_<filename>_<mode>.csv`: Per-prompt rows (mode, img, question, gt, pred, relation, raw, is_masked, explicit). E.g., columns for easy Excel analysis.

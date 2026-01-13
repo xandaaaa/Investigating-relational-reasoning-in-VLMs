@@ -129,8 +129,8 @@ def main():
     # Generate metadata
     metadata_file = generate_metadata(num_images, output_dir, start_index)
     
-    print(f"✅ Dataset generation complete!")
-    print(f"📁 Output: {output_dir.absolute()}")
+    print(f" Dataset generation complete!")
+    print(f" Output: {output_dir.absolute()}")
     print(f"   - Images: {output_dir / 'images'}")
     print(f"   - Annotations: {output_dir / 'annotations'}")
     print(f"   - Metadata: {metadata_file}")
