@@ -41,7 +41,7 @@ The script `query_eval.py` implements testing of the [Qwen3-VL-4B](https://huggi
 
 The queries are run for the raw images, as well as randomly masked versions of them, available under `synthetic_dataset_generation/output/masked/images`. This is done to test if the model uses the correct attention mechanism on images, that given the same prompt it outputs the correct answer in both versions. 
 
-To run the analysis `query_eval.py`, first write your HuggingFace access token in `line 318`. Go to https://huggingface.co/settings/tokens to get your HuggingFace.
+To run the analysis `query_eval.py`, first write your HuggingFace access token in `line 318`. Go to https://huggingface.co/settings/tokens to get your HuggingFace access token for free.
 
 > Please ensure availability of disk space before running, as the script will first download the model and checkpoints, and then run inference. 
 
