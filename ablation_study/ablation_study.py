@@ -149,7 +149,7 @@ plt.tight_layout()
 plt.savefig(OUTPUT_DIR / "ablation_accuracy_analysis.png", dpi=150, bbox_inches='tight')
 plt.show()
 
-print(f"\n✅ Saved: {OUTPUT_DIR / 'ablation_accuracy_analysis.png'}")
+print(f"\n Saved: {OUTPUT_DIR / 'ablation_accuracy_analysis.png'}")
 
 
 # ============================================================================
@@ -251,7 +251,7 @@ print(f"\nComputed {len(df_shift)} attention shift measurements")
 
 if len(df_shift) > 0:
     df_shift.to_csv(OUTPUT_DIR / "attention_shift_per_layer.csv", index=False)
-    print(f"✅ Saved: {OUTPUT_DIR / 'attention_shift_per_layer.csv'}")
+    print(f" Saved: {OUTPUT_DIR / 'attention_shift_per_layer.csv'}")
     
     
     # ============================================================================
@@ -316,7 +316,7 @@ if len(df_shift) > 0:
     plt.savefig(OUTPUT_DIR / "attention_shift_per_layer.png", dpi=150, bbox_inches='tight')
     plt.show()
     
-    print(f"\n✅ Saved: {OUTPUT_DIR / 'attention_shift_per_layer.png'}")
+    print(f"\n Saved: {OUTPUT_DIR / 'attention_shift_per_layer.png'}")
     
     
     # ============================================================================
@@ -362,7 +362,7 @@ if len(df_shift) > 0:
     plt.savefig(OUTPUT_DIR / "attention_shift_by_query_type.png", dpi=150, bbox_inches='tight')
     plt.show()
     
-    print(f"\n✅ Saved: {OUTPUT_DIR / 'attention_shift_by_query_type.png'}")
+    print(f"\n Saved: {OUTPUT_DIR / 'attention_shift_by_query_type.png'}")
     
     
     # ============================================================================
@@ -393,7 +393,7 @@ if len(df_shift) > 0:
     plt.savefig(OUTPUT_DIR / "attention_shift_correct_vs_incorrect.png", dpi=150, bbox_inches='tight')
     plt.show()
     
-    print(f"\n✅ Saved: {OUTPUT_DIR / 'attention_shift_correct_vs_incorrect.png'}")
+    print(f"\n Saved: {OUTPUT_DIR / 'attention_shift_correct_vs_incorrect.png'}")
 
 
 # ============================================================================
@@ -419,18 +419,7 @@ ATTENTION SHIFTS (Top 3 query types with largest shifts):
     for _, row in top3_shift.iterrows():
         print(f"  • {row['query_type']}: L1={row['l1_distance']:.4f}, Cos-Sim={row['cosine_similarity']:.3f}")
 
-print(f"""
-INTERPRETATION GUIDE:
-  • Large accuracy drop → Model relies on visual information
-  • Large attention shift → Model reallocates attention when visual info removed
-  • High retention rate → Model robust to masking (may use shortcuts)
-  
-  Expected for relational reasoning:
-    - Explicit connection/arrow: Large drops (needs visual arrows)
-    - Recognition: Moderate drops (can infer from context)
-    - Count: Proportional to masked entities
-""")
 
 print("\n" + "="*80)
-print(f"✅ All results saved to: {OUTPUT_DIR}")
+print(f" All results saved to: {OUTPUT_DIR}")
 print("="*80)
