@@ -1,4 +1,3 @@
-```markdown
 # 2D Synthetic Dataset for Visual Relational Reasoning
 
 A procedural dataset generator for studying relational reasoning in Vision-Language Models (VLMs). This tool creates controlled 2D scenes with geometric shapes and spatial relations, designed for mechanistic interpretability research on attention mechanisms in multimodal AI systems.
