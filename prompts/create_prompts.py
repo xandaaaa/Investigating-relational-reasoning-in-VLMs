@@ -565,5 +565,5 @@ if __name__ == "__main__":
 
     annotations_folder = 'synthetic_dataset_generation/output/annotations'
     annotations_masked_folder = 'synthetic_dataset_generation/output/masked/annotations'
-    output_json = 'queries.json'
+    output_json = './prompts/queries.json'
     compile_json(annotations_folder, annotations_masked_folder, output_json)

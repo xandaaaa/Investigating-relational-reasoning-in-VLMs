@@ -33,9 +33,7 @@ eval_results/attention_per_layer/
 
 ### Dependencies
 
-```bash
-pip install pandas numpy matplotlib seaborn scipy tqdm
-```
+
 
 ## Generating Required Data
 
@@ -43,29 +41,13 @@ pip install pandas numpy matplotlib seaborn scipy tqdm
 
 ```bash
 # Evaluate on unmasked images
-python query_eval.py \
-    --img_dir output/images \
-    --ann_dir output/annotations \
-    --max_samples 1000 \
-    --out_dir eval_results \
-    --save_attention
-
-# Evaluate on masked images
-python query_eval.py \
-    --img_dir output/masked/images \
-    --ann_dir output/masked/annotations \
-    --max_samples 1000 \
-    --out_dir eval_results \
-    --save_attention \
-    --masked
+python query_eval.py 
 ```
-
-**Important:** Make sure both runs save per-layer attention with `--save_attention` flag.
 
 ### Step 2: Run Ablation Analysis
 
 ```bash
-python ablation_analysis.py
+python ablation_study/ablation_analysis.py
 ```
 
 ## Output Files
