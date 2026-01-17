@@ -48,7 +48,7 @@ python query_eval.py \
     --ann_dir output/annotations \
     --max_samples 1000 \
     --out_dir eval_results \
-    --save_attention_per_layer
+    --save_attention
 
 # Evaluate on masked images
 python query_eval.py \
@@ -56,11 +56,11 @@ python query_eval.py \
     --ann_dir output/masked/annotations \
     --max_samples 1000 \
     --out_dir eval_results \
-    --save_attention_per_layer \
+    --save_attention \
     --masked
 ```
 
-**Important:** Make sure both runs save per-layer attention with `--save_attention_per_layer` flag.
+**Important:** Make sure both runs save per-layer attention with `--save_attention` flag.
 
 ### Step 2: Run Ablation Analysis
 
@@ -129,21 +129,3 @@ The script generates the following outputs in `eval_results/ablation_study/`:
   - **Close to 1** = similar attention patterns
   - **Close to 0** = orthogonal patterns
   - **Negative** = opposite patterns
-
-## Minimal Test Run (Fast)
-
-For testing the pipeline:
-
-```bash
-# Generate 50 images
-python generate_dataset.py --num_images 50
-python create_masked_dataset.py --num_images 50
-python generate_queries.py --num_images 50
-
-# Evaluate (both unmasked and masked)
-python query_eval.py --img_dir output/images --ann_dir output/annotations --max_samples 50 --save_attention_per_layer
-python query_eval.py --img_dir output/masked/images --ann_dir output/masked/annotations --max_samples 50 --save_attention_per_layer --masked
-
-# Run ablation
-python ablation_analysis.py
-```
