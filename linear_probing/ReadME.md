@@ -110,9 +110,14 @@ Analyzes spatial relationships with the following probes:
 **Total probes: 5 each**
 
 ## Usage
-
+For per layer probing analysis : 
 ```bash
-python layer_probing_analysis.py
+python linear_probing_classifier_per_layer.py
+```
+
+For aggregated layer probing analysis : 
+```bash
+python linear_probing_classifier.py
 ```
 
 The script will:
@@ -175,6 +180,7 @@ Key parameters to adjust:
 
 ## Notes
 
+- for aggregated layer, the output will remain similar for one accuracy each query (not per layer)
 - Requires at least 2 samples per class for train/test split
 - Stratified splitting ensures balanced class distribution
 - Features are standardized using StandardScaler
