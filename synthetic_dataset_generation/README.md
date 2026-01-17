@@ -261,18 +261,6 @@ Each `annotation_XXXXX.json` (original) or `annotation_XXXXX_masked.json` (maske
 - tqdm (progress bars)
 - Transformers, Torch (for VLM evaluation; ~8GB GPU recommended for Qwen-VL)
 
-### Setup
-
-```
-# Clone or navigate to directory
-cd synthetic_dataset_generation/
-
-# Install dependencies
-pip install -r requirements.txt
-
-# For VLM evaluation (add if needed)
-pip install transformers torch huggingface-hub
-```
 
 ## Usage
 
@@ -339,150 +327,7 @@ python create_masked_dataset.py --start_index 1000 --num_images 1000 --base_dir 
 - Masked annotations: `output/masked/annotations/annotation_<index>_masked.json`
 - Batch metadata: `output/masked/masked_metadata_<start>_<end>.json`
 
-### 3. Ground-Truth Annotation Loading
 
-Use `get_annotations.py` (AnnotationLoader class) to load GT for images:
-
-```
-# Python usage
-from get_annotations import AnnotationLoader
-
-loader = AnnotationLoader(base_dir="output")
-gt = loader.get_gt("image_00001.png", masked=True, fallback_to_original=True)
-print(json.dumps(gt, indent=2))  # Full JSON with entities/relations/masking_info
-```
-
-```
-# CLI
-python get_annotations.py image_00001.png --masked --fallback
-```
-
-**Ground-Truth Explanation**:
-- **Entities**: Unique shapes/colors/sizes at exact positions (centers/bboxes) – use for describing objects in prompts (e.g., "the red triangle").
-- **Relations**: All pairwise spatial triples (subject_id, object_id, relation, explicit) – derive prompts (e.g., "Is A left_of B?" for GT "yes").
-- **Masking Info** (masked only): Details what was removed (e.g., relation_index=1: "above" explicit) – flag in eval for ablation analysis.
-- **Access**: Loader extracts scene_id from filename (e.g., image_00001.png → ID=1). Fallback loads original if masked skipped. No manual file hunting.
-
-### 4. VLM Evaluation
-
-Use `test_single_image.py` for single-image testing (Qwen-VL by default) or your batch script (`evaluate_relations.py`) for full datasets. Prompts are dynamically generated from GT relations (one per relation, e.g., 3-6 prompts/image) using templates like "Is the {color} {shape} above the {color} {shape}?" (GT="yes").
-
-#### Single-Image Testing (`test_single_image.py`)
-
-Quickly probe a specific image (masked/unmasked) with all GT-derived prompts:
-
-```
-# Unmasked
-python test_single_image.py --image_filename image_00001.png --base_dir output
-
-# Masked (with fallback if skipped)
-python test_single_image.py --image_filename image_00001.png --masked --base_dir output
-
-# Both (compare unmasked vs. masked)
-python test_single_image.py --image_filename image_00001.png --both --base_dir output
-
-# Text-only baseline (no image)
-python test_single_image.py --image_filename image_00001.png --text_only --base_dir output
-
-# Custom output dir
-python test_single_image.py --image_filename image_00001.png --both --out_dir ./my_results --base_dir output
-```
-
-**Parameters**:
-- `--image_filename` (required): e.g., `image_00001.png` (extracts scene_id=1).
-- `--masked`: Test masked image/annotation (appends `_masked.png`/`_masked.json`).
-- `--both`: Run unmasked + masked sequentially.
-- `--text_only`: Skip image; test text prompts only (baseline).
-- `--base_dir` (default: `output`): Root for images/annotations.
-- `--out_dir` (default: `./rel_out_single`): Save CSV/JSON results.
-
-**Expected Outputs**:
-- **Console**:
-  ```
-  ================================================== Testing UNMASKED ==================================================  
-  Loaded GT: 3 entities, 3 relations
-  Image: output/images/image_00001.png
-  Prompt (left_of): Is the red triangle to the left of the blue square?
-  Raw: Yes, the red triangle is positioned to the left of the blue square.
-  Parsed: yes | GT: yes | Correct: ✓
-  
-  --- UNMASKED Summary ---
-  Prompts: 3 | Accuracy: 1.000
-    above: 1.000
-    below: 1.000
-    left_of: 1.000
-  
-  Saved CSV: ./rel_out_single/results_image_00001_both.csv
-  Saved JSON: ./rel_out_single/results_image_00001_both.json
-  ```
-  - For masked: Adds " MASKED RELATION (explicit=true: no arrow visible)" if prompt queries masked item.
-
-- **Files** (in `--out_dir`):
-  - `results_<filename>_<mode>.csv`: Per-prompt rows (mode, img, question, gt, pred, relation, raw, is_masked, explicit). E.g., columns for easy Excel analysis.
-  - `results_<filename>_<mode>.json`: Full results list + summary dict (acc, per_relation).
-
-- **GT Usage**: Prompts derive from GT relations (e.g., left_of → "Is A left of B?"); GT="yes" always. Masked GT flags ablations. Accuracy: Pred yes/no vs. GT (using your `parse_yesno`).
-
-**Batch Evaluation** (`evaluate_relations.py` – your original script):
-```
-python evaluate_relations.py --img_dir output/images --ann_dir output/annotations --max_samples 100 --out_dir ./batch_results
-```
-- Processes all/up to N annotations; generates GT prompts; saves CSV with metrics. Add `--masked` flag if extending for masked dir.
-
-### 5. Question Generation (Appending Queries)
-
-Generate VQA-style questions from annotations and append to existing `queries.json`:
-
-```
-# Generate queries for initial batch (0-999)
-python generate_queries.py
-
-# Append queries for additional batch (1000-2999)
-python generate_queries.py --start_index 1000 --num_images 1000
-
-# Custom options
-python generate_queries.py \
-  --start_index 2000 \
-  --num_images 500 \
-  --annotations_folder ./custom_output/annotations \
-  --annotations_masked_folder ./custom_output/masked/annotations \
-  --output_json ./my_queries.json \
-  --no_append  # Overwrite instead of appending
-```
-
-**Parameters**:
-- `--start_index`: First image index to process (default: 0)
-- `--num_images`: Number of images to process from start_index (default: None = all from start_index)
-- `--annotations_folder`: Path to annotations (default: 'synthetic_dataset_generation/output/annotations')
-- `--annotations_masked_folder`: Path to masked annotations (default: 'synthetic_dataset_generation/output/masked/annotations')
-- `--output_json`: Output queries file (default: 'queries.json')
-- `--no_append`: Overwrite output file instead of appending (default: append mode)
-
-**Output Format** (`queries.json`):
-```
-[
-  {
-    "image_id": 1000,
-    "image_filename": "image_01000.png",
-    "questions": [
-      {
-        "query_type": "count",
-        "query": "How many shapes are in this image? ...",
-        "ground_truth": "a)",
-        "ground_truth_masked": "b)"
-      },
-      {
-        "query_type": "recognition_shape",
-        "query": "Does this image have a circle shape? ...",
-        "ground_truth": "a)",
-        "ground_truth_masked": "None"
-      }
-      // ... more questions
-    ]
-  }
-  // ... more images
-]
-```
 
 **Query Types Generated**:
 - `count`: Number of shapes (1 per image)
@@ -506,11 +351,6 @@ synthetic_dataset_generation/
 ├── utils.py                 # Helper functions (collision detection, etc.)
 ├── generate_dataset.py      # Main execution script (with --start_index)
 ├── create_masked_dataset.py # Masking ablation (with --start_index)
-├── generate_queries.py      # VQA question generation (with --start_index)
-├── get_annotations.py       # AnnotationLoader class for GT loading
-├── test_single_image.py     # Single-image VLM testing (Qwen-VL, GT prompts)
-├── evaluate_relations.py    # Batch VLM evaluator (optional extension)
-└── requirements.txt         # Dependencies
 ```
 
 ### Key Classes
@@ -530,10 +370,6 @@ synthetic_dataset_generation/
 - Extracts scene_id from filename
 - Optional fallback for skipped masked images
 
-**QuestionGenerator** (`generate_queries.py`):
-- Generates multiple question types from annotations
-- Handles both original and masked ground truth
-- Supports incremental question generation
 
 ## Use Cases
 
